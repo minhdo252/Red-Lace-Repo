@@ -230,8 +230,8 @@ def build_seed_rows(restaurants: list[dict]) -> list[dict]:
     for r in restaurants:
         for it in r.get("menu_clean", []):
             price = it.get("price_vnd")
-            if not price or price <= 0:
-                continue  # no parseable price — nothing to seed for this item
+            if not price or price < 1000:
+                continue  # no real Hanoi menu item costs <1000 VND — catches parse bugs
             groups.setdefault(it["name_clean"], []).append(price)
 
     category_spread = compute_category_spread(groups)
