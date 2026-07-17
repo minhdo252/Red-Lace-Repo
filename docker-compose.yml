@@ -56,6 +56,119 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_started
+      seed-crawler:
+        condition: service_completed_successfully
+
+  # -----------------------------------------------------------------------
+  # Simple HTTP crawler (static HTML only — documents SPA limitation)
+  # Usage:  docker compose --profile crawler run --rm crawler
+  # -----------------------------------------------------------------------
+  crawler:
+    build:
+      context: ./backend
+    container_name: aitravelmate-crawler
+    user: "${UID:-1000}:${GID:-1000}"
+    volumes:
+      - ./test:/app/test
+    working_dir: /app
+    entrypoint: ["python", "test/crawl_shopeefood.py"]
+    profiles:
+      - crawler
+
+  # -----------------------------------------------------------------------
+  # Seeding agent (backend/app/agent/seed_price_references.py) — runs
+  # automatically on `docker compose up` (backend depends on it
+  # completing). Reuses backend/app/tools/crawl_shopeefood_full.py's crawl
+  # logic and backend/app/utils/ (menu_extract.py's DOM selectors, proven
+  # by test/crawl_menu_dom_explorer.py; menu_normalize.py's noise-reduction
+  # layer) and writes cleaned rows straight into Postgres price_references.
+  #
+  # Two layers of "don't re-do slow work":
+  #   1. If price_references already has rows, skip everything and exit —
+  #      only the very first `docker compose up` against an empty DB does
+  #      any work at all.
+  #   2. Otherwise, if backend/app/agent/output/crawled_restaurants_cache.json
+  #      exists (a committed, pre-crawled snapshot), seed straight from that
+  #      instead of hitting ShopeeFood live — makes `docker build` fast and
+  #      network-independent. Delete that file to force a fresh live crawl.
+  # Always exits 0 — a crawl failure never blocks the rest of the stack.
+  # Manual re-run:      docker compose run --rm seed-crawler
+  # Force live re-crawl: rm backend/app/agent/output/crawled_restaurants_cache.json
+  # Fast dev run:        CRAWL_MAX_PAGES=1 docker compose run --rm seed-crawler
+  # -----------------------------------------------------------------------
+  seed-crawler:
+    build:
+      context: ./backend       # same image as `backend` — includes Playwright + Chromium
+    container_name: aitravelmate-seed-crawler
+    user: "root"                    # playwright needs root to run Chromium in Docker
+    shm_size: "2gb"                 # prevent Chromium OOM crashes
+    restart: "no"                   # one-shot job, not a long-running service
+    environment:
+      PYTHONUNBUFFERED: "1"
+      POSTGRES_DSN: postgresql://${POSTGRES_USER:-aitravelmate}:${POSTGRES_PASSWORD:-aitravelmate}@postgres:5432/${POSTGRES_DB:-aitravelmate}
+      CRAWL_MAX_PAGES: ${CRAWL_MAX_PAGES:-2}
+    volumes:
+      - ./backend/app:/app/app
+    entrypoint: ["python", "-m", "app.agent.seed_price_references"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # -----------------------------------------------------------------------
+  # Playwright DOM explorer — single restaurant, dev/debug tool. Imports
+  # backend/app/utils/menu_normalize.py (PYTHONPATH below points at /app,
+  # the image's WORKDIR, so `from app.utils...` resolves — this script
+  # itself uses a plain `python file.py` invocation, which doesn't
+  # auto-add the cwd to sys.path the way `python -m` does).
+  # Usage:  docker compose --profile playwright run --rm playwright-crawler
+  #         docker compose --profile playwright run --rm playwright-crawler \
+  #             python test/crawl_menu_dom_explorer.py --index 3
+  # Output: test/output/menu_dom_dump.html, menu_dom_classes.txt,
+  #         menu_dom_screenshot.png, menu_schema_rows.json
+  # -----------------------------------------------------------------------
+  playwright-crawler:
+    build:
+      context: ./backend       # same image as `backend` — includes Playwright + Chromium
+    container_name: aitravelmate-playwright
+    user: "root"                    # playwright needs root to run Chromium in Docker
+    shm_size: "2gb"                 # prevent Chromium OOM crashes
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PYTHONPATH: /app
+    volumes:
+      - ./test:/app/test           # mount test/ so output is written to host
+      - ./backend/app:/app/app
+    entrypoint: ["python", "test/crawl_menu_dom_explorer.py"]
+    profiles:
+      - playwright                  # only starts when explicitly requested
+
+  # -----------------------------------------------------------------------
+  # Playwright full crawler (backend/app/tools/crawl_shopeefood_full.py) —
+  # paginates the whole listing, scrapes every restaurant's menu, runs the
+  # noise-reduction layer (backend/app/utils/menu_normalize.py), and writes
+  # a price_references-ready seed file. This is the same crawl logic
+  # seed-crawler imports; run this one directly when you want JSON output
+  # to inspect instead of a DB write.
+  # Usage:  docker compose --profile playwright-full run --rm playwright-full-crawler
+  # Output: test/output/shopeefood_full.json           (all restaurants + menus)
+  #         test/output/shopeefood_full_page_N.png     (listing page screenshots)
+  #         test/output/shopeefood_full_checkpoint.json (live progress, crash-safe)
+  #         test/output/price_references_seed.json     (cleaned rows, ready to import)
+  # -----------------------------------------------------------------------
+  playwright-full-crawler:
+    build:
+      context: ./backend       # same image as `backend` — includes Playwright + Chromium
+    container_name: aitravelmate-playwright-full
+    user: "root"                    # playwright needs root to run Chromium in Docker
+    shm_size: "2gb"                 # prevent Chromium OOM crashes
+    environment:
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./backend/app:/app/app
+      - ./test/output:/app/app/tools/output   # keep all crawler output under test/output
+    entrypoint: ["python", "-m", "app.tools.crawl_shopeefood_full"]
+    profiles:
+      - playwright-full             # only starts when explicitly requested
 
 volumes:
   postgres_data:

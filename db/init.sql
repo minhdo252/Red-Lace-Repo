@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS price_references (
     item_name    TEXT NOT NULL,
     region       TEXT NOT NULL,
     category     TEXT NOT NULL DEFAULT 'general', -- e.g. food, retail, xich_lo, boat
-    mu_post      DOUBLE PRECISION,                -- posterior mean in log-space
+    price_vnd    DOUBLE PRECISION,                -- raw observed price in VND (for display)
+    mu_post      DOUBLE PRECISION,                -- posterior mean in log-space  = ln(price_vnd)
     tau_post     DOUBLE PRECISION,                -- posterior variance in log-space
     sigma_data   DOUBLE PRECISION NOT NULL DEFAULT 0.3, -- assumed observation noise in log-space
     n            INTEGER NOT NULL DEFAULT 0,      -- number of real observed data points folded in

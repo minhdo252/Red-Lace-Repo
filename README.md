@@ -71,3 +71,37 @@ orchestrator + tool-calling**, not a multi-agent swarm.
 to load `price_references`, `emergency_hotlines`, `embassies`, and the
 Qdrant `item_names`/`scam_patterns` collections with real MVP data — that's
 the 0-6h roadmap step in the doc, not something this scaffold can invent.
+
+## Crawler agent
+
+`test/crawl_google_places.py` is the first data-collection agent: it pulls
+real restaurant listings (name, address, rating, review count, price level,
+recent reviews) for the three MVP regions via the official Google Places
+API.
+
+```bash
+# needs GOOGLE_PLACES_API_KEY set in .env
+docker compose run --rm crawler
+```
+
+Output lands in `test/output/places_<region_slug>.json`, one file per
+region — review before importing into Postgres.
+
+**Why Google Places and not ShopeeFood/TripAdvisor/Grab** (the sources
+named in the doc's section 2): `test/crawl_shopeefood.py` documents the
+investigation — ShopeeFood is a client-rendered SPA behind an internal,
+header-signed API that actively redirects automated navigation away from
+listing pages; TripAdvisor and Grab are gated similarly. Places is the only
+one with an official, ToS-compliant public API. Trade-off: it has no
+per-dish menu pricing, so it seeds business-existence/reputation data for
+module 2.2 (ghost-tour detector) — the item-level price data module 2.1
+needs still has to come from manual entry + LLM synthesis, per the doc's
+original fallback plan.
+
+**Known issue**: an earlier `docker compose run --rm crawler` invocation
+(before the backend `Dockerfile` was switched to a non-root user) left
+`test/output/` root-owned, which will block new writes with a
+`PermissionError`. Fix once with:
+```bash
+sudo chown -R $USER:$USER test/output
+```
