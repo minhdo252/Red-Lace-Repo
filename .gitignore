@@ -5,3 +5,7 @@ __pycache__/
 venv/
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+
+# Ignore documentation files related to Module 1 and 3
+TECHNICAL_PLAN_MODULE_1_AND_3.md
+MODULE_1_3_FRONTEND_INTEGRATION.md

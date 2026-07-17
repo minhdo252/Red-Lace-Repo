@@ -1,185 +1,289 @@
-# AITravelMate (Nón AI)
+# AITravelMate (Non AI)
 
-Backend + agent for the 48h MVP described in `NON_AI~1.MD`: a travel companion
-and interpreter for tourists in **Hanoi / Sapa / Hoi An** that translates, flags
-price anomalies, and flags scams. Structured data lives in Postgres; vector
-lookups live in Qdrant; the AI touchpoints call real hosted models (Qwen2.5-VL,
-FPT Cloud embeddings) directly.
+Backend + agent for the travel companion MVP in **Hanoi / Sapa / Hoi An**.
+The app translates tourist conversations, flags price/scam risks, and routes
+emergency contacts through a hardcoded SOS endpoint. Structured data lives in
+Postgres; vector lookups live in Qdrant; all main model calls go through the
+single `AIClient` gateway.
 
-> ⚠️ **Current status — AI layer mid-migration.** The old mock/live `AIClient`
-> (`backend/app/ai/client.py`) has been **removed** in favour of per-provider
-> modules. The **menu → price data pipeline works** end-to-end on real
-> providers. The **conversational `/chat` orchestrator does not currently boot**:
-> `orchestrator`, `critic`, `pricing`, `translation`, `scam_detection`, and
-> `image_reader` still import the deleted `app.ai.client` and need rewiring onto
-> the real providers (a chat provider, e.g. `GLM_API_KEY`, is not wired yet). The
-> FastAPI app therefore fails to import until those references are updated; the
-> standalone pipeline/tool scripts below are unaffected.
+## Stack
 
-## Stack (`docker-compose.yml`)
-
-- `postgres` — structured rows: `price_references`, `geo_regions`,
-  `emergency_hotlines`, `embassies`, `sessions` (schema: `db/init.sql`)
+- `postgres` — structured rows: `sessions`, `chat_turns`,
+  `threat_risk_state`, `sos_events`, `geo_regions`, `emergency_hotlines`,
+  `embassies`, `price_references`.
 - `qdrant` — vector collections: `item_names`, `scam_patterns`,
-  `unmatched_reports` (bootstrapped on backend startup)
-- `adminer` — Postgres UI at http://localhost:8080 (server: `postgres`,
-  user/pass from `.env`)
-- `backend` — FastAPI app (orchestrator + REST). Built from a Playwright base
-  image so it doubles as the crawler/seeder runtime.
-- `seed-crawler` — one-shot job, runs before `backend` on first boot to populate
-  `price_references` (see [Crawler agents](#crawler-agents))
-- `crawler` / `playwright-crawler` / `playwright-full-crawler` — profile-gated
-  crawl/debug tools (`docker compose --profile <name> run --rm <service>`)
+  `unmatched_reports`.
+- `adminer` — Postgres UI at http://localhost:8080.
+- `backend` — FastAPI app with `/sessions`, `/chat`, `/sos`, and `/health`.
+- `seed-crawler` — one-shot job that seeds `price_references` before backend
+  startup when needed.
+- `crawler` / `playwright-crawler` / `playwright-full-crawler` — optional
+  profile-gated crawl/debug tools.
 
 ## Run
 
 ```bash
-cp .env.example .env       # fill in provider API keys (see "AI providers")
+cp .env.example .env
 docker compose up --build
 ```
 
-- API: http://localhost:8000 — `GET /health`, `POST /chat`, `POST /sos`
-  (see the status note above re: `/chat`/`/sos`).
-- Every compose service builds its **own** image from `./backend`; rebuilding
-  `backend` does **not** rebuild `seed-crawler` — rebuild siblings explicitly
-  (`docker compose build <service>`) after adding a dependency.
+API:
 
-## AI providers
+- `GET /health`
+- `POST /sessions` — create onboarding session.
+- `POST /chat` — translate text/audio, run scam prefilter, run threat detection.
+- `POST /sos` — return prioritized emergency contacts and embassy data.
 
-There is no longer a single mock AI client. Each model touchpoint calls its
-provider directly, reading its key from the environment (`.env`, loaded by the
-`backend`/seed services via `env_file`):
+Every compose service builds its own image from `./backend`. If a dependency is
+added, rebuild any sibling service you use directly, for example
+`docker compose build backend seed-crawler`.
 
-| Concern | Module | Provider / key |
-|---|---|---|
-| Menu-photo OCR (handwritten VN menus) | `app/ai/qwen_vl.py` | Qwen2.5-VL-7B via FPT Cloud — `QWEN_VL_API_KEY` |
-| Text embeddings (Qdrant kNN) | `app/ai/vn_embedding.py` | `Vietnamese_Embedding` via FPT Cloud — `VN_EMBEDDING_API_KEY` |
-| Chat / tool-calling reasoning | *(pending)* | not wired — `GLM_API_KEY` reserved |
-| Speech-to-text | *(pending)* | not wired — `WHISPER_V3_API_KEY` reserved |
+## Environment
 
-Keys are read with `os.getenv` and fail fast with a clear error if unset/blank.
-`EMBEDDING_DIM` (`.env`) must match the embedding model's output (**1024** for
-`Vietnamese_Embedding`); the `item_names` collection is created at that size on
-first boot — changing it later means deleting and rebuilding the collection.
+The backend reads `.env` through Docker Compose. `docker-compose.yml` overrides
+the in-container Postgres DSN and Qdrant URL so services can talk over the
+Compose network.
 
-## Menu → price pipeline
+Important defaults:
 
-`app/tools/menu_price_pipeline.py` is an end-to-end "conductor" that turns a
-photographed menu into saved `price_references` observations by wiring four
-existing pieces in one linear flow:
-
-1. **OCR** — `app/ai/qwen_vl.py::ai_detect_menu`: image → Qwen2.5-VL → structured
-   items, split into confident `ready_rows` and `needs_review` (uncertain reads
-   never leave `needs_review`, so a misread price can't reach the pricing table
-   without a human).
-2. **Compare** — `app/modules/price_comparison.py::compare_price`: each confident
-   dish name is embedded (`vn_embedding`, query side) and kNN'd against Qdrant
-   `item_names`, then compared against the nearest comparable Postgres neighbors'
-   prices (similarity + head-phrase gating, similarity-weighted mean reference).
-3. **Filter** — keep only *matched* comparisons (`--save-which` can flip this to
-   `unmatched`/`all`).
-4. **Save** — `app/utils/to_postgree.py`: kept items are shaped into
-   `price_references` rows (n=1 new observations, `sigma_data` derived from the
-   live table) and INSERTed.
-
-Note: this is a plain INSERT, not a merge — saving a *matched* dish appends a new
-row next to the reference it matched rather than fusing into it. True online
-fusion is `app/modules/pricing.py::record_observation` (out of scope here).
-
-```bash
-# run standalone (needs QWEN_VL_API_KEY + VN_EMBEDDING_API_KEY in .env,
-# reachable Postgres + Qdrant). --no-save runs OCR→embed→compare without writing.
-docker compose run --rm --no-deps -v "$(pwd)/test:/app/test" \
-    --entrypoint python backend \
-    -m app.tools.menu_price_pipeline "test/menu 1.jpg" Hanoi --no-save
+```env
+AI_MODE=mock
+AI_MARKETPLACE_BASE_URL=https://mkp-api.fptcloud.com
+AI_API_KEY=
+AI_MODEL=Llama-3.3-70B-Instruct
+STT_MODEL=FPT.AI-whisper-large-v3-turbo
+EMBEDDING_MODEL=Vietnamese_Embedding
+VISION_MODEL=Qwen2.5-VL-7B-Instruct
+AI_REQUEST_TIMEOUT_SECONDS=60
+EMBEDDING_DIM=1024
+GOOGLE_PLACES_API_KEY=
 ```
 
-Region note: pass the region **as stored in `price_references`** (e.g. `Hanoi`),
-not qwen_vl's finer `KNOWN_REGIONS` taxonomy (`Hanoi/Old Quarter`) — the same
-string filters Qdrant, so a mismatch silently yields zero matches.
+With `AI_MODE=mock`, the backend runs without external model keys. To call AI
+Marketplace live, set `AI_MODE=live` and fill `AI_API_KEY`.
 
-## Orchestrator agent
+Standalone menu/VLM utilities may also use these optional keys:
 
-`app/agent/orchestrator.py` implements the doc's section-3 design: **single
-orchestrator + tool-calling**, not a multi-agent swarm.
-
-- `app/agent/tools.py` — the 6 tool specs exposed to the model
-  (`estimate_fair_price`, `read_image`, `match_scam_pattern`, `check_domain_age`,
-  `check_business_existence`, `translate_or_get_hotline`) and their dispatch to
-  `app/modules/*`.
-- `app/agent/critic.py` — second-pass check run whenever a tool raises a
-  price-anomaly or scam-pattern flag, before it's surfaced.
-- **Hard safety rule, enforced structurally, not just by prompt**: `trigger_sos`
-  is not in `TOOL_SPECS` and not in `TOOL_DISPATCH` — the agent has no code path
-  to place an emergency call. `/sos` is a separate endpoint the frontend hits
-  directly on a user tap.
-
-The orchestrator/critic still call the removed `ai_client.chat` and are part of
-the AI migration noted above.
-
-## Module implementation status
-
-| Module | File | Status |
-|---|---|---|
-| Menu-photo OCR (6.4) | `ai/qwen_vl.py` | **Real** — Qwen2.5-VL, deterministic decoding, strict JSON, uncertainty-flagged |
-| Text embeddings (6.1 lookup) | `ai/vn_embedding.py` | **Real** — FPT Cloud, asymmetric query/passage |
-| Menu→price pipeline | `tools/menu_price_pipeline.py` | **Real** — OCR → compare → save conductor |
-| Direct neighbor-price compare | `modules/price_comparison.py` | **Real** — gated kNN, similarity-weighted reference |
-| VLM rows → `price_references` | `utils/to_postgree.py` | **Real** — sync psycopg2, DB-derived sigma, sanity floor |
-| PII redaction (6.3) | `modules/pii.py` | **Real** — regex pass |
-| Domain age (WHOIS) | `modules/domain_check.py` | **Real** — no key needed |
-| Business existence (Google Places) | `modules/business_check.py` | **Real HTTP** — needs `GOOGLE_PLACES_API_KEY` |
-| Bayesian fair-price fusion (6.1) | `modules/pricing.py` | Real math; **imports removed `ai_client`** → pending rewire |
-| Scam pattern kNN + capture (6.2) | `modules/scam_detection.py` | Real Qdrant logic; **`ai_client.embed`** → pending rewire |
-| Image reading tool (6.4) | `modules/image_reader.py` | **`ai_client.vision`** → pending rewire |
-| Translation + hotline/embassy | `modules/translation.py` | Hotline/embassy lookup real; **`ai_client.chat`** → pending rewire |
-
-## Seeding data
-
-`db/init.sql` seeds `geo_regions` for Hanoi/Sapa/Hoi An and the `price_references`
-schema (raw `price_vnd` alongside the log-space posterior `mu_post`/`tau_post`).
-`price_references` is populated automatically on first boot by the `seed-crawler`
-service. `emergency_hotlines`, `embassies`, and the Qdrant `scam_patterns`
-collection still need real MVP data loaded manually. The `item_names` vectors are
-built from `price_references` by `python -m app.ai.vn_embedding`.
-
-## Crawler agents
-
-ShopeeFood's *listing* page is a client-rendered SPA, but each restaurant's
-*menu* page renders with plain headless Chromium (Playwright) — no signed API
-needed — so a real per-dish price crawler is feasible within scope.
-
-| File | Role |
-|---|---|
-| `backend/app/utils/menu_extract.py` | DOM selectors for menu items on a restaurant page |
-| `backend/app/utils/menu_normalize.py` | Cleans item names, parses VND prices, drops noise rows |
-| `backend/app/tools/crawl_shopeefood_full.py` | Paginates the full Hanoi listing, scrapes every menu, writes JSON |
-| `backend/app/agent/seed_price_references.py` | Reuses the crawler, merges observations per item, inserts into `price_references` |
-| `test/crawl_menu_dom_explorer.py` | Dev tool: dumps one restaurant's rendered DOM/CSS to reverse-engineer selectors |
-
-**Automatic on boot**: `docker compose up` runs `seed-crawler` before `backend`
-(`depends_on: condition: service_completed_successfully`). It skips crawling if
-`price_references` already has rows, otherwise seeds from the committed
-`backend/app/agent/output/crawled_restaurants_cache.json` snapshot instead of
-hitting ShopeeFood live. Delete that file (or set `FORCE_LIVE_CRAWL=1`) to force a
-fresh live crawl. The seeder always exits 0 so a crawl failure never blocks the
-stack.
-
-```bash
-docker compose run --rm seed-crawler                       # manual re-run
-CRAWL_MAX_PAGES=1 docker compose run --rm seed-crawler      # fast: fewer pages
-docker compose --profile playwright-full run --rm playwright-full-crawler  # JSON output only
+```env
+QWEN_VL_API_KEY=
+WHISPER_V3_API_KEY=
+VN_EMBEDDING_API_KEY=
+GLM_API_KEY=
 ```
 
-Business-existence data for module 2.2 (ghost-tour detector) has no crawler —
-`check_business_existence` calls the live Google Places API per request and needs
-`GOOGLE_PLACES_API_KEY`.
+Those optional keys do not replace the main Module 1/3 `AIClient` flow.
 
-## Known issues
+## AI Gateway
 
-- **Backend does not boot** until the six `app.ai.client` importers are rewired
-  onto real providers (see status note at top).
-- Each compose service builds its own image; a stale sibling image throws
-  `ModuleNotFoundError` after a dependency is added — `docker compose build <svc>`.
-- A crawler run under the old root-only image can leave `test/output/`
-  root-owned, blocking new writes: `sudo chown -R $USER:$USER test/output`.
+Main model touchpoints are routed through `backend/app/ai/client.py::AIClient`:
+
+- `chat()` — orchestrator, structured translation, threat context assessment.
+- `transcribe()` — STT via Whisper-compatible AI Marketplace API.
+- `embed()` — text embeddings for Qdrant kNN lookups.
+- `vision()` — image-reading tool for receipt/dish/page/chat screenshots.
+
+This keeps mock/live behavior centralized and prevents feature modules from
+creating separate SDK clients.
+
+## Module 1: Translation, STT, Context, Scam Signals
+
+Module 1 is centered on `POST /chat`.
+
+Backend behavior:
+
+- Validates a real `session_id`.
+- Accepts either `text` or `audio_base64`.
+- Converts browser audio to WAV 16kHz mono before STT.
+- Uses `speaker_role`, `audio_language_hint`, and region glossary for STT.
+- Redacts PII before model/scam/threat processing.
+- Loads server-side chat history from `chat_turns`.
+- Runs deterministic structured translation in parallel with the orchestrator.
+- Runs Qdrant scam prefilter plus rule fallback.
+- Runs threat detection and persists cumulative session risk.
+- Stores response payload for chunk idempotency by `session_id + chunk_sequence_id`.
+
+Typical request:
+
+```json
+{
+  "session_id": "...",
+  "text": "How much is this taxi ride?",
+  "region": "Hanoi",
+  "speaker_role": "tourist",
+  "chunk_sequence_id": 1,
+  "is_final_chunk": true
+}
+```
+
+Important response fields:
+
+- `source_text`
+- `translation`
+- `translation_details`
+- `scam_flags`
+- `scam_prefilter_status`
+- `threat`
+- `chunk_sequence_id`
+- `resolved_region`
+- `server_turn_id`
+
+## Module 3: Threat Detection and Smart SOS
+
+Threat detection runs inside `/chat`, while emergency contact lookup is isolated
+in `POST /sos`.
+
+Safety invariant:
+
+- The agent has no `trigger_sos` tool.
+- `/sos` is only called by frontend/user action.
+- Backend returns contacts and location text; it never places a phone call.
+
+`/chat` may return:
+
+```json
+{
+  "threat": {
+    "final_level": "CRITICAL",
+    "show_sos_button": true,
+    "auto_open_sos_modal": true,
+    "primary_threat_category": "physical_violence",
+    "sos_reason": "CRITICAL: physical_violence"
+  }
+}
+```
+
+Frontend should then open an SOS modal and call `/sos` only after explicit user
+confirmation.
+
+Typical `/sos` request:
+
+```json
+{
+  "session_id": "...",
+  "lat": 22.336,
+  "lon": 103.843,
+  "threat_category": "medical_emergency",
+  "threat_level": "CRITICAL",
+  "source": "smart_trigger",
+  "idempotency_key": "sos-unique-key"
+}
+```
+
+Backend behavior:
+
+- Validates the session.
+- Resolves GPS to `Hanoi`, `Sapa`, or `Hoi An` when possible.
+- Falls back to national `Vietnam` hotlines if GPS cannot resolve.
+- Gets nationality from request or session.
+- Sorts contacts by `threat_category`.
+- Adds embassy data when available.
+- Logs `sos_events`.
+- Replays existing response for duplicate `idempotency_key`.
+- Soft rate-limits repeated SOS calls in a short window.
+
+Important response fields:
+
+- `contacts`
+- `location_text_vi`
+- `location_text_en`
+- `resolved_region`
+- `region_fallback_used`
+- `event_id`
+- `rate_limited`
+
+## API Quickstart
+
+Create session:
+
+```bash
+curl -X POST http://localhost:8000/sessions \
+  -H "Content-Type: application/json" \
+  -d '{"native_language":"ko","nationality":"KR"}'
+```
+
+Chat:
+
+```bash
+curl -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "<SESSION_ID>",
+    "text": "help me, he has a knife",
+    "lat": 22.336,
+    "lon": 103.843,
+    "speaker_role": "tourist",
+    "chunk_sequence_id": 1
+  }'
+```
+
+SOS:
+
+```bash
+curl -X POST http://localhost:8000/sos \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "<SESSION_ID>",
+    "lat": 22.336,
+    "lon": 103.843,
+    "threat_category": "medical_emergency",
+    "threat_level": "CRITICAL",
+    "source": "smart_trigger",
+    "idempotency_key": "test-sos-001"
+  }'
+```
+
+## Data Seeding
+
+`db/init.sql` creates runtime tables and seeds:
+
+- `geo_regions` for Hanoi/Sapa/Hoi An.
+- national and city-level emergency hotlines.
+- embassy contacts for MVP nationalities.
+- `price_references` schema.
+
+The `seed-crawler` service populates `price_references` when the table is
+empty. Qdrant `item_names` and `scam_patterns` still need real MVP vector data
+for highest quality. If `scam_patterns` is empty or Qdrant is degraded, `/chat`
+still returns rule fallback results and `scam_prefilter_status` so the UI can
+show degraded-state behavior instead of silently assuming no risk.
+
+## Crawler Agents
+
+ShopeeFood listing pages are client-rendered, but restaurant menu pages render
+with Playwright. The crawler stack is retained for price reference data.
+
+Useful files:
+
+- `backend/app/utils/menu_extract.py`
+- `backend/app/utils/menu_normalize.py`
+- `backend/app/tools/crawl_shopeefood_full.py`
+- `backend/app/agent/seed_price_references.py`
+- `test/crawl_menu_dom_explorer.py`
+
+Manual runs:
+
+```bash
+docker compose run --rm seed-crawler
+CRAWL_MAX_PAGES=1 docker compose run --rm seed-crawler
+docker compose --profile playwright-full run --rm playwright-full-crawler
+```
+
+## Frontend Integration Docs
+
+Detailed Module 1/3 frontend contract lives in:
+
+```txt
+MODULE_1_3_FRONTEND_INTEGRATION.md
+```
+
+It covers request/response shapes, TypeScript fetch helpers, audio base64
+handling, smart SOS modal behavior, and frontend checklists.
+
+## Known Notes
+
+- Local host audio decoding needs `ffmpeg` in PATH if running outside Docker.
+  The backend Docker image installs `ffmpeg`.
+- `EMBEDDING_DIM` must stay `1024` for `Vietnamese_Embedding`. If a Qdrant
+  collection was created with the wrong dimension, delete and recreate it.
+- A crawler run under an old root-owned image can leave `test/output/`
+  unwritable; fix once with `sudo chown -R $USER:$USER test/output` on Linux.

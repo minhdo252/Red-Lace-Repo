@@ -103,6 +103,10 @@ TOOL_SPECS: list[dict[str, Any]] = [
                 "text": {"type": "string"},
                 "region": {"type": "string"},
                 "nationality": {"type": "string"},
+                "native_language": {
+                    "type": "string",
+                    "description": "Tourist's preferred/native language from session context, e.g. ko, en, zh, ja.",
+                },
             },
             "required": ["text", "region", "nationality"],
         },

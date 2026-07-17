@@ -8,6 +8,7 @@ entirely (trigger_sos is not in its tool set — see app/agent/tools.py).
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from app.agent.critic import critic_pass
@@ -63,8 +64,17 @@ async def handle_turn(
         messages.append(
             {
                 "role": "assistant",
+                "content": None,
                 "tool_calls": [
-                    {"id": c.id, "name": c.name, "arguments": c.arguments} for c in response.tool_calls
+                    {
+                        "id": c.id,
+                        "type": "function",
+                        "function": {
+                            "name": c.name,
+                            "arguments": json.dumps(c.arguments, ensure_ascii=False),
+                        },
+                    }
+                    for c in response.tool_calls
                 ],
             }
         )
@@ -74,7 +84,12 @@ async def handle_turn(
             if _is_risk_flag(call.name, result):
                 risk_flag_raised = True
             messages.append(
-                {"role": "tool", "tool_call_id": call.id, "name": call.name, "content": result}
+                {
+                    "role": "tool",
+                    "tool_call_id": call.id,
+                    "name": call.name,
+                    "content": json.dumps(result, ensure_ascii=False, default=str),
+                }
             )
     else:
         final_text = "Xin lỗi, mình xử lý hơi lâu — bạn thử hỏi lại ngắn gọn hơn nhé."
