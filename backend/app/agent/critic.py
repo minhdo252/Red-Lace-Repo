@@ -1,3 +1,4 @@
+
 """Critic pass (doc section 3): a second LLM call sanity-checking any risk
 conclusion before it's surfaced, to control the false-alarm rate."""
 

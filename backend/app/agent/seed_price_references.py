@@ -76,6 +76,8 @@ except ImportError:
     sys.exit("[ERROR] Run inside seed-crawler/playwright container (needs playwright).")
 
 from app.tools.crawl_shopeefood_full import collect_all_restaurants, scrape_menu, REGION, CATEGORY
+from app.ai.vn_embedding import embed_price_references
+from app.db.postgres import close_pool as close_shared_pool
 
 POSTGRES_DSN = os.environ.get(
     "POSTGRES_DSN", "postgresql://aitravelmate:aitravelmate@postgres:5432/aitravelmate"
@@ -228,7 +230,7 @@ def build_seed_rows(restaurants: list[dict]) -> list[dict]:
     one price_references row (see merge_observations)."""
     groups: dict[str, list[float]] = {}
     for r in restaurants:
-        for it in r.get("menu_clean", []):
+        for it in (r.get("menu_clean") or []):
             price = it.get("price_vnd")
             if not price or price < 1000:
                 continue  # no real Hanoi menu item costs <1000 VND — catches parse bugs
@@ -283,6 +285,18 @@ async def main() -> None:
         inserted = await insert_rows(pool, seed_rows)
         print(f"[✓] Inserted {inserted} unique-item price_references rows "
               f"from {len(restaurants)} restaurants.")
+
+        # --- Step 2: Embed all price_references and push to Qdrant ---
+        if inserted > 0:
+            print("[~] Embedding price_references into Qdrant via vn_embedding...")
+            try:
+                total_embedded = await embed_price_references()
+                print(f"[✓] Embedded {total_embedded} item_names into Qdrant.")
+            except Exception as e:
+                print(f"[!] Embedding into Qdrant failed ({e}) — "
+                      "price_references are in Postgres; run vn_embedding manually later.")
+            finally:
+                await close_shared_pool()  # clean up the pool embed_price_references() opened
 
     finally:
         await pool.close()

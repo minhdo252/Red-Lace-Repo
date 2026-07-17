@@ -218,6 +218,19 @@ def _strip_code_fence(text: str) -> str:
     return text.strip()
 
 
+def _require_api_key() -> str:
+    """Read QWEN_VL_API_KEY from the environment (the backend/seed services
+    load it from .env via env_file). Fails clearly if it is unset OR empty,
+    rather than letting a blank key surface as an opaque auth error later."""
+    key = os.getenv("QWEN_VL_API_KEY")
+    if not key:
+        raise RuntimeError(
+            "QWEN_VL_API_KEY is not set. Add it to .env (loaded by the backend "
+            "service via env_file) or export it in the environment."
+        )
+    return key
+
+
 def ai_detect_menu(
     image_path: str,
     region: str,
@@ -259,7 +272,7 @@ def ai_detect_menu(
             "Pass strict_region=False if this is an intentional new region."
         )
 
-    api_key = os.environ["QWEN_VL_API_KEY"]
+    api_key = _require_api_key()
     client = OpenAI(api_key=api_key, base_url=BASE_URL)
 
     base64_image, mime_type = _encode_image(image_path)
@@ -309,46 +322,95 @@ def ai_detect_menu(
             print(piece, end="", flush=True)
             result_text += piece
 
-    return _parse_result(result_text)
+    return _build_result(result_text, region, category)
 
 
-def _parse_result(raw_text: str) -> MenuDetectionResult:
+def _build_result(raw_text: str, region: str, category: str) -> MenuExtractionResult:
+    """Parse the model's JSON and split items into ready_rows vs needs_review.
+
+    ready_rows: confident (uncertain=False) AND a usable price_vnd — packaged
+    as single-observation (n=1) PriceReferenceRow candidates using the module
+    default sigma_data. needs_review: everything else, so a misread name/price
+    can't quietly reach the pricing table without a human confirming it.
+    """
+    extracted_at = datetime.now(timezone.utc).isoformat()
     cleaned = _strip_code_fence(raw_text)
     try:
         data = json.loads(cleaned)
-        items = [
-            MenuItem(
-                name_raw=it.get("name_raw", ""),
-                price_raw=it.get("price_raw", ""),
-                price_vnd=it.get("price_vnd"),
-                uncertain=bool(it.get("uncertain", False)),
-                notes=it.get("notes", ""),
-            )
-            for it in data.get("items", [])
-        ]
-        return MenuDetectionResult(
-            items=items,
-            unreadable_regions=data.get("unreadable_regions", 0),
+    except (json.JSONDecodeError, TypeError) as exc:
+        # Model failed to follow the JSON schema. Surface this loudly instead
+        # of silently returning an empty/guessed result — a parse failure
+        # should never be presented as "no items found".
+        return MenuExtractionResult(
+            region=region,
+            category=category,
             raw_response=raw_text,
+            parse_error=str(exc),
+            extracted_at=extracted_at,
         )
-    except (json.JSONDecodeError, AttributeError, TypeError) as exc:
-        # Model failed to follow the JSON schema. Surface this loudly
-        # instead of silently returning an empty/guessed result -
-        # a parse failure should never be presented as "no items found".
-        return MenuDetectionResult(raw_response=raw_text, parse_error=str(exc))
+
+    items = [
+        MenuItem(
+            name_raw=it.get("name_raw", ""),
+            price_raw=it.get("price_raw", ""),
+            price_vnd=it.get("price_vnd"),
+            uncertain=bool(it.get("uncertain", False)),
+            notes=it.get("notes", ""),
+        )
+        for it in data.get("items", [])
+    ]
+
+    ready_rows: list[PriceReferenceRow] = []
+    needs_review: list[MenuItem] = []
+    for it in items:
+        if it.uncertain or not it.price_vnd or it.price_vnd <= 0:
+            needs_review.append(it)
+            continue
+        sum_y = math.log(it.price_vnd)
+        ready_rows.append(
+            PriceReferenceRow(
+                item_name=it.name_raw,
+                region=region,
+                category=category,
+                price_vnd=float(it.price_vnd),
+                mu_post=sum_y,
+                tau_post=DEFAULT_SIGMA_DATA ** 2,  # n=1: variance of a single obs
+                sigma_data=DEFAULT_SIGMA_DATA,
+                n=1,
+                sum_y=sum_y,
+                ocr_notes=it.notes,
+            )
+        )
+
+    return MenuExtractionResult(
+        ready_rows=ready_rows,
+        needs_review=needs_review,
+        unreadable_regions=data.get("unreadable_regions", 0),
+        region=region,
+        category=category,
+        raw_response=raw_text,
+        parse_error=None,
+        extracted_at=extracted_at,
+    )
 
 
 if __name__ == "__main__":
     import sys
 
-    image_path = sys.argv[1] if len(sys.argv) > 1 else "path/to/your/image.jpg"
-    result = ai_detect_menu(image_path)
+    if len(sys.argv) < 3:
+        sys.exit('usage: python -m app.ai.qwen_vl "<image_path>" "<region>"')
+    image_path, region = sys.argv[1], sys.argv[2]
+    result = ai_detect_menu(image_path, region=region)
     print("\n\n--- Parsed result ---")
     if result.parse_error:
         print(f"PARSE ERROR: {result.parse_error}")
         print("Raw response:", result.raw_response)
     else:
-        for item in result.items:
+        print(f"Ready rows ({len(result.ready_rows)}):")
+        for row in result.ready_rows:
+            print(f"  {row.item_name} - {row.price_vnd} VND")
+        print(f"Needs review ({len(result.needs_review)}):")
+        for item in result.needs_review:
             flag = " [UNCERTAIN]" if item.uncertain else ""
-            print(f"{item.name_raw} - {item.price_raw} ({item.price_vnd}){flag}")
+            print(f"  {item.name_raw} - {item.price_raw} ({item.price_vnd}){flag}")
         print(f"Unreadable regions skipped: {result.unreadable_regions}")
