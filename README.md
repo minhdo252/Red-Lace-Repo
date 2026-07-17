@@ -13,6 +13,10 @@ API key required to boot the stack.
 - `adminer` — Postgres UI at http://localhost:8080 (system: PostgreSQL,
   server: `postgres`, user/pass from `.env`)
 - `backend` — FastAPI app with the single orchestrator agent
+- `seed-crawler` — one-shot job, runs before `backend` on first boot to
+  populate `price_references` (see [Crawler agents](#crawler-agents))
+- `crawler` / `playwright-crawler` / `playwright-full-crawler` — manual,
+  profile-gated crawl/debug tools (`docker compose --profile <name> run --rm <service>`)
 
 ## Run it
 
@@ -67,40 +71,64 @@ orchestrator + tool-calling**, not a multi-agent swarm.
 
 ## Seeding data
 
-`db/init.sql` seeds `geo_regions` for Hanoi/Sapa/Hoi An only. You still need
-to load `price_references`, `emergency_hotlines`, `embassies`, and the
-Qdrant `item_names`/`scam_patterns` collections with real MVP data — that's
-the 0-6h roadmap step in the doc, not something this scaffold can invent.
+`db/init.sql` seeds `geo_regions` for Hanoi/Sapa/Hoi An and the
+`price_references` schema (now with a `price_vnd` column alongside
+`mu_post`/`tau_post` for display). `price_references` itself is no longer
+manual-only: the `seed-crawler` service (below) populates it automatically
+on first boot. `emergency_hotlines`, `embassies`, and the Qdrant
+`item_names`/`scam_patterns` collections still need real MVP data loaded —
+that part of the 0-6h roadmap step remains manual.
 
-## Crawler agent
+## Crawler agents
 
-`test/crawl_google_places.py` is the first data-collection agent: it pulls
-real restaurant listings (name, address, rating, review count, price level,
-recent reviews) for the three MVP regions via the official Google Places
-API.
+The doc's section 2 originally scoped real crawlers out of the 48h MVP
+(manual entry + LLM synthesis instead) because ShopeeFood/TripAdvisor/Grab
+looked ToS-gated. Investigation (`test/crawl_shopeefood_playwright.py`,
+`test/crawl_menu_dom_explorer.py`) found ShopeeFood's *listing* page is a
+client-rendered SPA but each restaurant's *menu* page is reachable with a
+plain headless-Chromium render (Playwright) — no signed internal API
+needed — so a real per-dish price crawler turned out to be feasible within
+scope after all, and module 2.1's price data no longer depends on manual
+entry.
+
+| File | Role |
+|---|---|
+| `backend/app/utils/menu_extract.py` | DOM selectors for menu items on a restaurant page (verified against real rendered DOM via `crawl_menu_dom_explorer.py`) |
+| `backend/app/utils/menu_normalize.py` | Cleans item names, parses VND prices, drops noise rows |
+| `backend/app/tools/crawl_shopeefood_full.py` | Paginates the full Hanoi listing, scrapes every restaurant's menu, writes JSON (`test/output/shopeefood_full.json`, `price_references_seed.json`) — run this directly to inspect crawl output without touching Postgres |
+| `backend/app/agent/seed_price_references.py` | Reuses the crawler above, groups observations per item, merges them into one posterior per `(item_name, region, category)`, and inserts straight into `price_references` |
+| `test/crawl_shopeefood_playwright.py` | Early listing-page render spike (superseded by the full crawler above; kept for reference) |
+| `test/crawl_menu_dom_explorer.py` | Dev/debug tool: dumps one restaurant's rendered DOM + CSS classes to reverse-engineer selectors |
+
+**Automatic on boot**: `docker compose up` runs `seed-crawler` before
+`backend` starts (`depends_on: condition: service_completed_successfully`).
+It skips crawling entirely if `price_references` already has rows, and
+otherwise seeds from the committed
+`backend/app/agent/output/crawled_restaurants_cache.json` snapshot instead
+of hitting ShopeeFood live — keeps builds fast and network-independent.
+Delete that file, or set `FORCE_LIVE_CRAWL=1`, to force a fresh live crawl
+(re-writes the cache on success). A crawl failure never blocks the stack:
+the seeder always exits 0, leaving `price_references` empty and
+`estimate_fair_price()` falling back to an LLM-only prior (`n=0`).
 
 ```bash
-# needs GOOGLE_PLACES_API_KEY set in .env
-docker compose run --rm crawler
+# manual re-run
+docker compose run --rm seed-crawler
+
+# fast local test: fewer listing pages -> fewer restaurants discovered
+CRAWL_MAX_PAGES=1 docker compose run --rm seed-crawler
+
+# inspect crawl output as JSON instead of writing to Postgres
+docker compose --profile playwright-full run --rm playwright-full-crawler
 ```
 
-Output lands in `test/output/places_<region_slug>.json`, one file per
-region — review before importing into Postgres.
+Business-existence/reputation data for module 2.2 (ghost-tour detector)
+still has no crawler — `check_business_existence` depends on
+`GOOGLE_PLACES_API_KEY` being set and calls the live Google Places API
+per-request rather than a seeded table.
 
-**Why Google Places and not ShopeeFood/TripAdvisor/Grab** (the sources
-named in the doc's section 2): `test/crawl_shopeefood.py` documents the
-investigation — ShopeeFood is a client-rendered SPA behind an internal,
-header-signed API that actively redirects automated navigation away from
-listing pages; TripAdvisor and Grab are gated similarly. Places is the only
-one with an official, ToS-compliant public API. Trade-off: it has no
-per-dish menu pricing, so it seeds business-existence/reputation data for
-module 2.2 (ghost-tour detector) — the item-level price data module 2.1
-needs still has to come from manual entry + LLM synthesis, per the doc's
-original fallback plan.
-
-**Known issue**: an earlier `docker compose run --rm crawler` invocation
-(before the backend `Dockerfile` was switched to a non-root user) left
-`test/output/` root-owned, which will block new writes with a
+**Known issue**: an earlier crawler run under the old root-only backend
+image left `test/output/` root-owned, which will block new writes with a
 `PermissionError`. Fix once with:
 ```bash
 sudo chown -R $USER:$USER test/output

@@ -30,7 +30,7 @@
 
 | Hạng mục gốc | Quyết định cho 48h |
 |---|---|
-| Crawler thật (Google Maps/TripAdvisor/ShopeeFood/Grab) | Bỏ cho bản lõi. Nhập tay + LLM synthetic data cho giá/món 3 địa điểm. Đánh dấu crawler thật là Phase 2 |
+| Crawler thật (Google Maps/TripAdvisor/ShopeeFood/Grab) | **Cập nhật:** ShopeeFood có crawler thật chạy được — menu từng nhà hàng render được bằng headless Chromium (Playwright), không cần API nội bộ ký header như tưởng ban đầu (xem `backend/app/tools/crawl_shopeefood_full.py`). `seed-crawler` tự chạy khi `docker compose up`, nạp thẳng `price_references` cho vùng Hà Nội — bỏ bớt phần nhập tay giá/món ở mục 9 (0-6h). TripAdvisor/Grab vẫn bị chặn như đánh giá gốc, chưa có crawler — vẫn Phase 2. Google Places (business existence, module 2.2) vẫn gọi API trực tiếp mỗi request, không seed. |
 | Geo_Regions polygon/PostGIS | Bỏ. Dùng `city + zone_name` + tâm GPS + bán kính đơn giản, match theo khoảng cách gần nhất |
 | Vector DB | Qdrant, xem mục 1 |
 | Taxi pricing động (Matrix API + hệ số mưa/giờ cao điểm) | Bỏ. Bảng giá cố định VND/km theo vùng |
@@ -172,7 +172,7 @@ Regex pass che số thẻ/CMND trên text OCR trước khi gửi tiếp lên LLM
 
 | Khung giờ | Việc chính |
 |---|---|
-| 0-6h | Setup FastAPI, Qdrant (Docker/cloud), Postgres (Supabase); tạo collections/tables; nhập tay dữ liệu giá 3 địa điểm + seed 30 scam pattern (`price_scam`) + 15-20 pattern (`ghost_tour_pressure`) |
+| 0-6h | Setup FastAPI, Qdrant (Docker/cloud), Postgres (Supabase); tạo collections/tables; `seed-crawler` tự nạp giá món ăn Hà Nội (ShopeeFood, xem mục 2) — chỉ còn nhập tay/LLM synthetic cho Sapa + Hội An + các category chưa crawl được (xích lô/thuyền); seed 30 scam pattern (`price_scam`) + 15-20 pattern (`ghost_tour_pressure`) |
 | 6-16h | Module 1 (dịch turn-based) + Module 2.1 (quét hóa đơn/món ăn, Bayesian) — ưu tiên tuyệt đối, làm chắc trước |
 | 16-26h | Module 2 scam voice matching (Qdrant) tích hợp vào flag của Module 1 |
 | 26-34h | Module 3 emergency tĩnh (hotline theo vùng + đại sứ quán theo quốc tịch, click-to-call) |
