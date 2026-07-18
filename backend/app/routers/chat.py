@@ -14,6 +14,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from app.agent.orchestrator import handle_turn
+from app.agent.price_advisor import price_advice
 from app.ai.client import ai_client
 from app.config import settings
 from app.db.postgres import get_pool
@@ -391,7 +392,9 @@ def _build_price_reply(
     return "\n".join(["Here's what I read from the menu:", *lines, "", footer])
 
 
-async def _run_image_route(images: list[dict[str, Any]], region: str) -> dict[str, Any]:
+async def _run_image_route(
+    images: list[dict[str, Any]], region: str, native_language: str = "en"
+) -> dict[str, Any]:
     """Image route — Module 2.1 only. OCR each menu photo (Qwen-VL) and compare its
     confidently-priced items against local references (compare_price), producing a
     deterministic price verdict. When nothing readable/priced comes back, signal
@@ -469,8 +472,16 @@ async def _run_image_route(images: list[dict[str, Any]], region: str) -> dict[st
             "overall_overpriced": any(item["overpriced"] for item in analysis_items),
         }
 
+    # Deterministic retake prompt stays deterministic; a real price verdict gets the
+    # LLM friendly advice (falling back to the deterministic list if GLM is down).
+    if needs_retake:
+        reply = _build_price_reply(analysis_items, needs_retake, retake_reason)
+    else:
+        reply = await price_advice(analysis_items, native_language) or _build_price_reply(
+            analysis_items, needs_retake, retake_reason
+        )
     return {
-        "reply": _build_price_reply(analysis_items, needs_retake, retake_reason),
+        "reply": reply,
         "tools_invoked": tools_invoked,
         "normalized_prices_vnd": normalized_prices,
         "price_analysis": price_analysis,
@@ -506,7 +517,9 @@ def _build_price_text_reply(analysis: dict[str, Any], intent: PriceIntent, regio
     return f"{name}: {observed:,.0f}₫ looks about fair — the typical local price is ~{reference:,.0f}₫. ✅"
 
 
-async def _run_price_text_route(intent: PriceIntent, region: str) -> dict[str, Any] | None:
+async def _run_price_text_route(
+    intent: PriceIntent, region: str, native_language: str = "en"
+) -> dict[str, Any] | None:
     """Text price-check route — Module 2.1 (compare_price) directly, no Qwen-VL OCR
     and no chatbot LLM. Returns response fields, or None to fall through to the
     orchestrator (a 'how much' question whose item has no local/web reference — let
@@ -537,8 +550,11 @@ async def _run_price_text_route(intent: PriceIntent, region: str) -> dict[str, A
         "category": "food",
         "observed_price": intent.observed_price,
     }
+    reply = await price_advice([analysis], native_language) or _build_price_text_reply(
+        analysis, intent, region
+    )
     return {
-        "reply": _build_price_text_reply(analysis, intent, region),
+        "reply": reply,
         "tools_invoked": [{"tool": "compare_price", "arguments": args, "result": comparison}],
         "normalized_prices_vnd": [intent.observed_price] if intent.observed_price is not None else [],
         "price_analysis": {
@@ -715,7 +731,7 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks) -> ChatR
 
     if route == "image":
         image_result = await _run_image_route(
-            [image.model_dump() for image in request.images], region
+            [image.model_dump() for image in request.images], region, native_language
         )
         reply = image_result["reply"]
         tools_invoked = image_result["tools_invoked"]
@@ -747,7 +763,11 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks) -> ChatR
         # không", "how much is bún đậu?") -> Module 2.1 directly: no Qwen-VL OCR and
         # no chatbot LLM. None / a "how much" miss falls through to the orchestrator.
         price_intent = detect_price_intent(clean_text)
-        price_result = await _run_price_text_route(price_intent, region) if price_intent else None
+        price_result = (
+            await _run_price_text_route(price_intent, region, native_language)
+            if price_intent
+            else None
+        )
         if price_result is not None:
             reply = price_result["reply"]
             tools_invoked = price_result["tools_invoked"]

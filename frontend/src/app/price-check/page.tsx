@@ -17,6 +17,7 @@ import { TopBar } from "@/components/shell/TopBar";
 import { Button } from "@/components/ui/Button";
 import { Chip } from "@/components/ui/Chip";
 import { AnalysisLoader } from "@/components/ui/AnalysisLoader";
+import { Markdown } from "@/components/ui/Markdown";
 import { useApp, useT } from "@/i18n";
 import { usePhase, useFakeProgress } from "@/lib/hooks";
 import { formatVnd, delay } from "@/lib/utils";
@@ -228,9 +229,10 @@ export default function PriceCheckPage() {
                   <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-teal/20 text-teal-deep">
                     <MessageSquareQuote size={18} />
                   </span>
-                  <p className="whitespace-pre-line text-[0.9rem] leading-snug text-ink-soft text-pretty">
-                    {live.reply || t.disclaimer}
-                  </p>
+                  <Markdown
+                    text={live.reply || t.disclaimer}
+                    className="text-[0.9rem] leading-snug text-ink-soft text-pretty"
+                  />
                 </div>
 
                 {live.analysis?.items?.length ? (

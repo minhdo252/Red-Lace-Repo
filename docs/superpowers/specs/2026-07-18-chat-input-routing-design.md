@@ -169,6 +169,29 @@ Frontend note: per `frontend/AGENTS.md`, this is a modified Next.js — read `no
 
 Note: real end-to-end runs need the live stack (`docker compose` here, or the deployed Railway backend) and configured model keys — consistent with how the rest of the backend is verified (the app can't run keyless once mock is removed from these routes).
 
+## Price advice (LLM, tiered) — image + price-text routes
+
+Both Module 2.1 routes (menu photo, typed price) run their `compare_price` result
+through `app/agent/price_advisor.py::price_advice` to produce the user-facing reply
+(GLM-5.2 via `glm_chat`, same pattern as the critic):
+
+- The **tier is computed deterministically** from `price_diff_pct` so the rules are
+  exact — over a menu the worst item wins and is named:
+  - `> 100%` over → **avoid** (strongly recommend another place)
+  - `50–100%` over → **caution** (can be location / reputation / quality — but reconsider)
+  - `< 50%` over / fair / cheaper → **reasonable** (small difference from location,
+    ingredients, portion, service)
+  - no observed price ("how much") → **info** (state the typical price)
+  - no reference → **unknown** (couldn't compare)
+- GLM writes short, warm **markdown** advice **in the tourist's `native_language`** for
+  that tier. `price_advice` returns `None` on GLM failure / no key → the caller falls
+  back to the deterministic `_build_price_reply` / `_build_price_text_reply` (graceful,
+  not mock). `native_language` is threaded from the session into both routes.
+- Frontend renders the markdown: `frontend/src/components/ui/Markdown.tsx` (a
+  dependency-free renderer for `**bold**`, `*italic*`, `- ` bullets, line breaks) is
+  used in `AssistantReply.tsx` (Home chat) and the price-check reply, so the model's
+  `*` markers show as styling, not literal text.
+
 ## Out of scope
 
 - No changes to Module 2.2 (`check_ghost_tour`) or the `/sos` router.

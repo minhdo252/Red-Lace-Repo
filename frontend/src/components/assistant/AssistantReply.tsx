@@ -15,6 +15,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import type { AssistantMessage, AssistantAction, AssistantVerdict } from "@/mocks/assistant";
+import { Markdown } from "@/components/ui/Markdown";
 import { cn } from "@/lib/utils";
 
 const verdictCfg: Record<
@@ -67,7 +68,7 @@ export function AssistantReply({
         </div>
       )}
 
-      <p className="text-[0.95rem] leading-relaxed text-ink text-pretty">{msg.text}</p>
+      <Markdown text={msg.text} className="text-[0.95rem] leading-relaxed text-ink text-pretty" />
 
       {msg.pattern && (
         <p className="mt-2 text-sm font-semibold text-danger">{msg.pattern}</p>
