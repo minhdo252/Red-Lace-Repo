@@ -57,6 +57,22 @@ export type ScamFlag = {
   top_match?: unknown;
 };
 
+export type PriceAnalysisItem = {
+  item?: string | null;
+  observed_price?: number | null;
+  reference_price?: number | null;
+  reference_price_range?: [number, number] | null;
+  overpriced?: boolean;
+  price_diff_pct?: number | null;
+  flag?: string | null;
+};
+
+export type PriceAnalysis = {
+  region?: string | null;
+  items: PriceAnalysisItem[];
+  overall_overpriced?: boolean;
+};
+
 export type ChatEnvelope = {
   source: "backend" | "mock";
   session_id?: string | null;
@@ -71,6 +87,11 @@ export type ChatEnvelope = {
   tools_invoked?: { tool?: string; arguments?: Record<string, unknown>; result?: Record<string, unknown> }[];
   normalized_prices_vnd?: number[];
   resolved_region?: string | null;
+  // Input-type routing signals (backend chat-input-routing design).
+  input_route?: "text" | "voice" | "image" | null;
+  needs_retake?: boolean;
+  retake_reason?: string | null;
+  price_analysis?: PriceAnalysis | null;
   error?: string;
 };
 

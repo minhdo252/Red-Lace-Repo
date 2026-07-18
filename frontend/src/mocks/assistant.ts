@@ -4,7 +4,7 @@ export type AssistantVerdict = "safe" | "caution" | "scam";
 
 export type AssistantAction = {
   label: string;
-  kind: "grab" | "police" | "translate" | "price" | "tour" | "map";
+  kind: "grab" | "police" | "translate" | "price" | "tour" | "map" | "retake";
 };
 
 export type AssistantMessage = {

@@ -11,6 +11,7 @@ import {
   MapPin,
   ReceiptText,
   Link2,
+  Camera,
   ArrowRight,
 } from "lucide-react";
 import type { AssistantMessage, AssistantAction, AssistantVerdict } from "@/mocks/assistant";
@@ -37,6 +38,7 @@ const actionIcon = {
   price: ReceiptText,
   tour: Link2,
   map: MapPin,
+  retake: Camera,
 } as const;
 
 /** The AI's reasoned answer — verdict, why, and what to do. Light (Gemini) surface. */

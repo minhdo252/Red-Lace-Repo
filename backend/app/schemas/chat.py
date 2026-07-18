@@ -71,6 +71,13 @@ class ChatResponse(BaseModel):
     scam_flags: list[dict[str, Any]] = Field(default_factory=list)
     scam_prefilter_status: dict[str, Any] | None = None
     threat: dict[str, Any] | None = None
+    # Input-type routing (see docs/superpowers/specs/2026-07-18-chat-input-routing-design.md):
+    # which deterministic route handled the turn, and the image route's retake signal +
+    # structured price verdict.
+    input_route: Literal["text", "voice", "image"] | None = None
+    needs_retake: bool = False
+    retake_reason: str | None = None
+    price_analysis: dict[str, Any] | None = None
     chunk_sequence_id: int | None = None
     is_final_chunk: bool = True
     resolved_region: str | None = None

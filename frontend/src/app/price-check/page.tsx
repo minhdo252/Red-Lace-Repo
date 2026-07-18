@@ -16,19 +16,21 @@ import { Screen } from "@/components/shell/Screen";
 import { TopBar } from "@/components/shell/TopBar";
 import { Button } from "@/components/ui/Button";
 import { Chip } from "@/components/ui/Chip";
-import { Gauge } from "@/components/ui/Gauge";
 import { AnalysisLoader } from "@/components/ui/AnalysisLoader";
-import { PriceTable } from "@/components/price/PriceTable";
 import { useApp, useT } from "@/i18n";
 import { usePhase, useFakeProgress } from "@/lib/hooks";
 import { formatVnd, delay } from "@/lib/utils";
-import { receiptAnalysis, analysisSteps } from "@/mocks/price-check";
-import { chatRequest, fileToBase64, localeToNativeLanguage } from "@/lib/api";
+import { analysisSteps } from "@/mocks/price-check";
+import { chatRequest, fileToBase64, localeToNativeLanguage, type PriceAnalysis } from "@/lib/api";
 
 type P = "capture" | "analyzing" | "result";
 
-/** A live backend fair-price result (AI reply + normalized prices); null = mock fallback. */
-type LiveResult = { reply: string; prices: number[]; region: string | null };
+/** Real backend outcome for a receipt photo (no mock): a read price verdict, a
+ * "retake the photo" signal, or a "backend unreachable" error. */
+type LiveResult =
+  | { kind: "ok"; reply: string; prices: number[]; region: string | null; analysis: PriceAnalysis | null }
+  | { kind: "retake"; reply: string }
+  | { kind: "error" };
 
 export default function PriceCheckPage() {
   const t = useT("price");
@@ -46,9 +48,9 @@ export default function PriceCheckPage() {
     phase === "analyzing",
   );
 
-  // Photograph a receipt/menu -> POST /api/chat (images, receipt mode). On a live
-  // backend, show its reply + normalized prices; otherwise fall back to the mock
-  // gauge + PriceTable. (Same AI-native path as Home's photo scan.)
+  // Photograph a receipt/menu -> POST /api/chat (images, receipt mode). Real input
+  // only: show the backend's price verdict + prices, a "retake the photo" prompt when
+  // it couldn't be read, or a graceful error when the backend is unreachable. No mock.
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
@@ -69,15 +71,19 @@ export default function PriceCheckPage() {
       }),
       delay(1200),
     ]);
-    setLive(
-      env.source === "backend"
-        ? {
-            reply: env.reply ?? "",
-            prices: env.normalized_prices_vnd ?? [],
-            region: env.resolved_region ?? null,
-          }
-        : null,
-    );
+    if (env.source !== "backend") {
+      setLive({ kind: "error" });
+    } else if (env.needs_retake) {
+      setLive({ kind: "retake", reply: env.reply ?? "" });
+    } else {
+      setLive({
+        kind: "ok",
+        reply: env.reply ?? "",
+        prices: env.normalized_prices_vnd ?? [],
+        region: env.resolved_region ?? null,
+        analysis: env.price_analysis ?? null,
+      });
+    }
     setPhase("result");
   };
 
@@ -87,9 +93,7 @@ export default function PriceCheckPage() {
     setPhase("capture");
   };
 
-  const a = receiptAnalysis;
-  const verdictLabel = a.verdict === "fair" ? t.fair : a.verdict === "mid" ? t.mid : t.high;
-  const areaLabel = live ? live.region : a.area;
+  const areaLabel = live && live.kind === "ok" ? live.region : null;
 
   return (
     <Screen>
@@ -196,8 +200,29 @@ export default function PriceCheckPage() {
               )}
             </div>
 
-            {live ? (
-              /* ---- live backend result: AI reply + normalized prices ---- */
+            {live?.kind === "error" && (
+              <div className="rounded-[var(--radius-lg)] bg-surface p-5 shadow-[var(--shadow-soft)]">
+                <p className="text-[0.9rem] leading-snug text-ink-soft text-pretty">
+                  I couldn&apos;t reach the assistant right now. Please check your connection and try again.
+                </p>
+              </div>
+            )}
+
+            {live?.kind === "retake" && (
+              <div className="rounded-[var(--radius-lg)] bg-surface p-5 shadow-[var(--shadow-soft)]">
+                <div className="flex items-start gap-3">
+                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-mid/20 text-[oklch(0.5_0.12_70)]">
+                    <Camera size={18} />
+                  </span>
+                  <p className="text-[0.9rem] leading-snug text-ink-soft text-pretty">
+                    {live.reply ||
+                      "I couldn't read that photo. Please retake a clearer, closer photo of the menu."}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {live?.kind === "ok" && (
               <div className="rounded-[var(--radius-lg)] bg-surface p-5 shadow-[var(--shadow-soft)]">
                 <div className="flex items-start gap-3">
                   <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-teal/20 text-teal-deep">
@@ -207,7 +232,30 @@ export default function PriceCheckPage() {
                     {live.reply || t.disclaimer}
                   </p>
                 </div>
-                {live.prices.length > 0 && (
+
+                {live.analysis?.items?.length ? (
+                  <div className="mt-4 space-y-2 border-t border-line pt-4">
+                    {live.analysis.items.map((it, i) => (
+                      <div key={i} className="flex items-center justify-between gap-3 text-sm">
+                        <span className="truncate text-ink">{it.item}</span>
+                        <span className="flex shrink-0 items-center gap-2">
+                          {typeof it.observed_price === "number" && (
+                            <span className="font-extrabold text-ink">{formatVnd(it.observed_price)}</span>
+                          )}
+                          {it.overpriced ? (
+                            <span className="rounded-full bg-high/[0.12] px-2 py-0.5 text-xs font-semibold text-high">
+                              {typeof it.price_diff_pct === "number" ? `+${Math.round(it.price_diff_pct)}%` : "high"}
+                            </span>
+                          ) : (
+                            <span className="rounded-full bg-moss-soft px-2 py-0.5 text-xs font-semibold text-moss-strong">
+                              fair
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : live.prices.length > 0 ? (
                   <div className="mt-4 border-t border-line pt-4">
                     <p className="mb-2 text-xs font-semibold text-ink-mute">Prices found</p>
                     <div className="flex flex-wrap gap-2">
@@ -221,49 +269,8 @@ export default function PriceCheckPage() {
                       ))}
                     </div>
                   </div>
-                )}
+                ) : null}
               </div>
-            ) : (
-              /* ---- mock fallback: verdict gauge + per-item table + advice ---- */
-              <>
-                <div className="rounded-[var(--radius-lg)] bg-surface p-5 shadow-[var(--shadow-soft)]">
-                  <Gauge
-                    verdict={a.verdict}
-                    label={verdictLabel}
-                    sublabel={a.overpayPct > 0 ? `${a.overpayPct}% over usual` : "within range"}
-                  />
-                  <div className="mt-4 grid grid-cols-2 gap-3">
-                    <div className="rounded-2xl bg-high/[0.06] p-3.5 text-center">
-                      <p className="text-xs font-medium text-ink-mute">{t.youPaid}</p>
-                      <p className="mt-0.5 font-display text-xl font-extrabold text-high">
-                        {formatVnd(a.totalPaid)}
-                      </p>
-                    </div>
-                    <div className="rounded-2xl bg-moss-soft p-3.5 text-center">
-                      <p className="text-xs font-medium text-ink-mute">{t.reference}</p>
-                      <p className="mt-0.5 font-display text-[0.95rem] font-extrabold text-moss-strong">
-                        {formatVnd(a.refLow)}–{formatVnd(a.refHigh)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <p className="mb-2 px-1 font-display text-[1.05rem] font-bold text-ink">
-                    {t.perItem}
-                  </p>
-                  <PriceTable items={a.items} />
-                </div>
-
-                <div className="flex items-start gap-3 rounded-[var(--radius-card)] bg-teal/8 p-4">
-                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-teal/20 text-teal-deep">
-                    <MessageSquareQuote size={18} />
-                  </span>
-                  <p className="text-[0.85rem] leading-snug text-ink-soft text-pretty">
-                    {t.disclaimer}
-                  </p>
-                </div>
-              </>
             )}
 
             <div className="flex gap-3">

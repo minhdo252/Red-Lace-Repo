@@ -9,14 +9,7 @@ import { AppDrawer } from "@/components/shell/AppDrawer";
 import { AssistantReply } from "@/components/assistant/AssistantReply";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { useApp, useT } from "@/i18n";
-import { delay } from "@/lib/utils";
-import {
-  taxiThread,
-  photoScanReply,
-  routeThread,
-  type AssistantMessage,
-  type AssistantAction,
-} from "@/mocks/assistant";
+import { type AssistantMessage, type AssistantAction } from "@/mocks/assistant";
 import {
   blobToBase64,
   chatRequest,
@@ -60,11 +53,18 @@ export default function HomePage() {
         content: m.text,
       }));
 
+  /** Append a plain AI note (errors, "no audio") and drop into chat view — never a
+   * fabricated answer, just a real status message. */
+  const pushAiNote = (text: string) => {
+    setMessages((m) => [...m, { id: nextId("a"), role: "ai", text, verdict: "caution" }]);
+    setPhase("chat");
+    scrollEnd();
+  };
+
   /**
    * Append the user's message, run the real backend turn (POST /api/chat), then
-   * append the AI reply. Keeps the same phase machine + animation the scripted
-   * `run()` had, but sources the reply from the backend — falling back to
-   * `fallbackAi()` (the original mock thread) when no backend is configured.
+   * append the real AI reply. No mock/canned answers: if the backend is
+   * unreachable we say so; if a photo can't be read we ask the user to retake it.
    */
   const send = async (
     userMsg: AssistantMessage,
@@ -74,7 +74,6 @@ export default function HomePage() {
       audio_format?: string;
       images?: { image_base64: string; mode: string }[];
     },
-    fallbackAi: () => AssistantMessage[],
     updateUserFromTranscript = false,
   ) => {
     const priorHistory = historyFromMessages(messages);
@@ -92,18 +91,33 @@ export default function HomePage() {
       ...payload,
     });
 
-    let aiMsgs: AssistantMessage[];
+    let aiMsg: AssistantMessage;
     if (env.source === "backend") {
       if (updateUserFromTranscript && env.source_text) {
         const transcript = env.source_text;
         setMessages((m) => m.map((x) => (x.id === userMsg.id ? { ...x, text: transcript } : x)));
       }
-      aiMsgs = [toAssistantMessage(env, nextId("a"))];
+      aiMsg = env.needs_retake
+        ? {
+            id: nextId("a"),
+            role: "ai",
+            text:
+              env.reply ||
+              "I couldn't read that photo — please retake a clearer photo of the menu.",
+            verdict: "caution",
+            actions: [{ label: "Retake photo", kind: "retake" }],
+          }
+        : toAssistantMessage(env, nextId("a"));
     } else {
-      await delay(1200); // keep the "thinking" beat so mock mode still feels alive
-      aiMsgs = fallbackAi().map((m) => ({ ...m, id: nextId("a") }));
+      // Backend unreachable — surface a real error, never a fake answer.
+      aiMsg = {
+        id: nextId("a"),
+        role: "ai",
+        text: "I couldn't reach the assistant right now. Please check your connection and try again.",
+        verdict: "caution",
+      };
     }
-    setMessages((m) => [...m, ...aiMsgs]);
+    setMessages((m) => [...m, aiMsg]);
     setPhase("chat");
     scrollEnd();
   };
@@ -113,7 +127,7 @@ export default function HomePage() {
     if (!q) return;
     setInput("");
     const userMsg: AssistantMessage = { id: nextId("u"), role: "user", text: q };
-    void send(userMsg, { text: q }, () => routeThread(q).slice(1));
+    void send(userMsg, { text: q });
   };
 
   const startRecording = async (): Promise<boolean> => {
@@ -146,16 +160,12 @@ export default function HomePage() {
 
   const onMic = async () => {
     if (phase === "thinking") return;
-    // Second tap: stop recording and send the captured audio.
+    // Second tap: stop recording and send the real captured audio.
     if (listening) {
       setListening(false);
       const blob = await stopRecording();
       if (!blob || !blob.size) {
-        void send(
-          { id: nextId("u"), role: "user", text: taxiThread[0].text },
-          { text: taxiThread[0].text },
-          () => taxiThread.slice(1),
-        );
+        pushAiNote("I didn't catch any audio — please try again.");
         return;
       }
       const audioBase64 = await blobToBase64(blob);
@@ -163,22 +173,14 @@ export default function HomePage() {
       void send(
         { id: nextId("u"), role: "user", text: "🎤 …" },
         { audio_base64: audioBase64, audio_format: fmt },
-        () => taxiThread.slice(1),
         true,
       );
       return;
     }
-    // First tap: begin recording (fall back to the scripted demo if no mic).
+    // First tap: begin recording. No mic access = a real error, not a scripted demo.
     const ok = await startRecording();
     if (!ok) {
-      setListening(true);
-      await delay(1300);
-      setListening(false);
-      void send(
-        { id: nextId("u"), role: "user", text: taxiThread[0].text },
-        { text: taxiThread[0].text },
-        () => taxiThread.slice(1),
-      );
+      pushAiNote("I can't access the microphone. Please enable mic access and try again.");
       return;
     }
     setListening(true);
@@ -191,9 +193,7 @@ export default function HomePage() {
     e.target.value = "";
     const base64 = await fileToBase64(file);
     const userMsg: AssistantMessage = { id: nextId("u"), role: "user", text: "", image: url };
-    void send(userMsg, { text: "", images: [{ image_base64: base64, mode: "receipt" }] }, () => [
-      photoScanReply,
-    ]);
+    void send(userMsg, { text: "", images: [{ image_base64: base64, mode: "receipt" }] });
   };
 
   const newChat = () => {
@@ -202,6 +202,10 @@ export default function HomePage() {
   };
 
   const onAction = (a: AssistantAction) => {
+    if (a.kind === "retake") {
+      fileRef.current?.click();
+      return;
+    }
     const map: Record<string, string> = {
       grab: "/map", police: "/sos", translate: "/translate",
       price: "/price-check", tour: "/tour-check", map: "/map",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import re
 import time
@@ -18,9 +19,11 @@ from app.config import settings
 from app.db.postgres import get_pool
 from app.modules.audio_pipe import normalize_transcribed_text, preprocess_audio_for_stt
 from app.modules.geo import resolve_region, validate_lat_lon
+from app.modules.image_reader import read_image
 from app.modules.language import canonical_language_code, is_supported_native_language
 from app.modules.memory import trigger_background_compression
 from app.modules.pii import redact_pii
+from app.modules.price_comparison import compare_price
 from app.modules.scam_detection import match_scam_pattern
 from app.modules.threat_detection import detect_threat
 from app.modules.translation import resolve_translation_target, translate_text
@@ -354,6 +357,145 @@ async def _run_orchestrator_for_chat(
     }
 
 
+def _build_price_reply(
+    items: list[dict[str, Any]],
+    needs_retake: bool,
+    retake_reason: str | None,
+) -> str:
+    """Deterministic, human-readable price verdict for the image route — no LLM.
+    When the menu couldn't be read, this is the retake prompt the chatbot shows."""
+    if needs_retake:
+        if retake_reason == "no_menu_detected":
+            return (
+                "I couldn't find a menu or receipt in that photo. "
+                "Please retake a clear, close-up photo of the menu."
+            )
+        return (
+            "That photo was hard to read. "
+            "Please retake a clearer, closer photo of the menu."
+        )
+
+    lines: list[str] = []
+    for item in items:
+        observed = item.get("observed_price")
+        if observed is None:
+            continue
+        name = item.get("item") or "Item"
+        reference = item.get("reference_price")
+        if reference is None:
+            lines.append(f"• {name}: {observed:,.0f}₫ — no local reference to compare")
+        elif item.get("overpriced") and item.get("price_diff_pct") is not None:
+            lines.append(
+                f"• {name}: {observed:,.0f}₫ — reference ~{reference:,.0f}₫ "
+                f"(about {item['price_diff_pct']:.0f}% higher)"
+            )
+        else:
+            lines.append(f"• {name}: {observed:,.0f}₫ — looks fair (reference ~{reference:,.0f}₫)")
+
+    if not lines:
+        return (
+            "I read the photo but couldn't find any priced items to compare. "
+            "Please retake a clearer photo of the menu."
+        )
+
+    overpriced = any(item.get("overpriced") for item in items)
+    footer = (
+        "⚠️ Some items look higher than the typical local price."
+        if overpriced
+        else "✅ Prices look about fair for the area."
+    )
+    return "\n".join(["Here's what I read from the menu:", *lines, "", footer])
+
+
+async def _run_image_route(images: list[dict[str, Any]], region: str) -> dict[str, Any]:
+    """Image route — Module 2.1 only. OCR each menu photo (Qwen-VL) and compare its
+    confidently-priced items against local references (compare_price), producing a
+    deterministic price verdict. When nothing readable/priced comes back, signal
+    needs_retake so the chatbot asks for a clearer photo. Never runs the orchestrator,
+    translate, scam-prefilter, or threat — and never fabricates a price: an OCR/compare
+    failure surfaces as a retake, not a made-up answer."""
+    analysis_items: list[dict[str, Any]] = []
+    normalized_prices: list[int] = []
+    tools_invoked: list[dict[str, Any]] = []
+    saw_error = False
+    saw_any_item = False
+    saw_ready_item = False
+
+    for img in images:
+        mode = img.get("mode") or "receipt"
+        try:
+            image_bytes = base64.b64decode(img["image_base64"])
+            result = await read_image(image_bytes, mode, region=region)
+        except Exception:  # noqa: BLE001 - surface as retake, never crash/fabricate
+            saw_error = True
+            continue
+        if not isinstance(result, dict) or result.get("error"):
+            saw_error = True
+            continue
+        if result.get("parse_error"):
+            saw_error = True
+
+        ready = result.get("ready_items") or []
+        review = result.get("needs_review") or []
+        if ready:
+            saw_ready_item = True
+        if ready or review:
+            saw_any_item = True
+
+        category = result.get("category", "food")
+        for item in ready:
+            observed = item.get("price_vnd")
+            args = {
+                "item": item.get("item_name"),
+                "region": region,
+                "category": category,
+                "observed_price": observed,
+            }
+            try:
+                comparison = await compare_price(
+                    item=args["item"], region=region, category=category, observed_price=observed
+                )
+            except Exception:  # noqa: BLE001 - a failed compare shouldn't sink the whole read
+                comparison = {"error": "compare_failed"}
+            tools_invoked.append({"tool": "compare_price", "arguments": args, "result": comparison})
+            if isinstance(observed, (int, float)):
+                normalized_prices.append(int(observed))
+            analysis_items.append(
+                {
+                    "item": args["item"],
+                    "observed_price": int(observed) if isinstance(observed, (int, float)) else None,
+                    "reference_price": comparison.get("reference_price"),
+                    "reference_price_range": comparison.get("reference_price_range"),
+                    "overpriced": bool(comparison.get("flag")),
+                    "price_diff_pct": comparison.get("price_diff_pct"),
+                    "flag": comparison.get("flag"),
+                }
+            )
+
+    needs_retake = not saw_ready_item
+    retake_reason: str | None = None
+    if needs_retake:
+        retake_reason = "no_menu_detected" if (saw_error or not saw_any_item) else "unreadable"
+
+    price_analysis: dict[str, Any] | None = None
+    if not needs_retake:
+        price_analysis = {
+            "region": region,
+            "items": analysis_items,
+            "overall_overpriced": any(item["overpriced"] for item in analysis_items),
+        }
+
+    return {
+        "reply": _build_price_reply(analysis_items, needs_retake, retake_reason),
+        "tools_invoked": tools_invoked,
+        "normalized_prices_vnd": normalized_prices,
+        "price_analysis": price_analysis,
+        "needs_retake": needs_retake,
+        "retake_reason": retake_reason,
+        "degraded": saw_error and needs_retake,
+    }
+
+
 async def _persist_chat_turn(
     pool: Any,
     session_id: uuid.UUID,
@@ -499,44 +641,101 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks) -> ChatR
     orchestrator_history = [session_context] + active_history
     context_text = [str(message.get("content", "")) for message in active_history[-3:]]
 
-    turn_result, translation_details, scam_result, threat_result = await asyncio.gather(
-        _run_orchestrator_for_chat(
-            clean_text,
-            history=orchestrator_history,
-            images=[image.model_dump() for image in request.images],
-            region=region,
-        ),
-        _translate_for_chat(clean_text, nationality, native_language, context_text, speaker_role),
-        _scan_scam_prefilter(clean_text, region=region),
-        detect_threat(clean_text, session_id=request.session_id, conversation_context=context_text + [clean_text]),
-    )
-    scam_flags, scam_status = scam_result
-    translation_text = translation_details.get("translated_text")
-    reply = turn_result.get("reply") or translation_text or ""
+    # Deterministic input-type routing (see the chat-input-routing design spec):
+    #   image -> Module 2.1 only; voice -> Module 1 translate + scam + threat (no
+    #   orchestrator); text -> the full orchestrator pipeline (unchanged). Precedence
+    #   image > voice > text keeps behavior deterministic if both ever arrive.
+    route = "image" if request.images else ("voice" if audio_supplied else "text")
+
+    reply = ""
+    translation_details: dict[str, Any] | None = None
+    translation_text: str | None = None
+    scam_flags: list[dict[str, Any]] = []
+    scam_status: dict[str, Any] | None = None
+    threat_payload: dict[str, Any] | None = None
+    tools_invoked: list[dict[str, Any]] = []
+    critic: dict[str, Any] | None = None
+    normalized_prices: list[int] = []
+    price_analysis: dict[str, Any] | None = None
+    needs_retake = False
+    retake_reason: str | None = None
     degraded_components: list[str] = []
-    if turn_result.get("degraded"):
-        degraded_components.append("orchestrator")
-    if translation_details.get("degraded"):
-        degraded_components.append("translation")
-    if not scam_status.get("qdrant_ok"):
-        degraded_components.append("scam_prefilter")
-    if getattr(threat_result, "degraded", False):
-        degraded_components.append("threat_assessment")
+
+    if route == "image":
+        image_result = await _run_image_route(
+            [image.model_dump() for image in request.images], region
+        )
+        reply = image_result["reply"]
+        tools_invoked = image_result["tools_invoked"]
+        normalized_prices = image_result["normalized_prices_vnd"]
+        price_analysis = image_result["price_analysis"]
+        needs_retake = image_result["needs_retake"]
+        retake_reason = image_result["retake_reason"]
+        if image_result.get("degraded"):
+            degraded_components.append("image_pipeline")
+    elif route == "voice":
+        translation_details, scam_result, threat_result = await asyncio.gather(
+            _translate_for_chat(clean_text, nationality, native_language, context_text, speaker_role),
+            _scan_scam_prefilter(clean_text, region=region),
+            detect_threat(clean_text, session_id=request.session_id, conversation_context=context_text + [clean_text]),
+        )
+        scam_flags, scam_status = scam_result
+        translation_text = translation_details.get("translated_text")
+        reply = translation_text or ""
+        normalized_prices = translation_details.get("normalized_prices_vnd") or []
+        threat_payload = threat_result.to_dict()
+        if translation_details.get("degraded"):
+            degraded_components.append("translation")
+        if not scam_status.get("qdrant_ok"):
+            degraded_components.append("scam_prefilter")
+        if getattr(threat_result, "degraded", False):
+            degraded_components.append("threat_assessment")
+    else:  # text — unchanged full pipeline
+        turn_result, translation_details, scam_result, threat_result = await asyncio.gather(
+            _run_orchestrator_for_chat(
+                clean_text,
+                history=orchestrator_history,
+                images=[image.model_dump() for image in request.images],
+                region=region,
+            ),
+            _translate_for_chat(clean_text, nationality, native_language, context_text, speaker_role),
+            _scan_scam_prefilter(clean_text, region=region),
+            detect_threat(clean_text, session_id=request.session_id, conversation_context=context_text + [clean_text]),
+        )
+        scam_flags, scam_status = scam_result
+        translation_text = translation_details.get("translated_text")
+        reply = turn_result.get("reply") or translation_text or ""
+        tools_invoked = turn_result.get("tools_invoked", [])
+        critic = turn_result.get("critic")
+        normalized_prices = translation_details.get("normalized_prices_vnd") or []
+        threat_payload = threat_result.to_dict()
+        if turn_result.get("degraded"):
+            degraded_components.append("orchestrator")
+        if translation_details.get("degraded"):
+            degraded_components.append("translation")
+        if not scam_status.get("qdrant_ok"):
+            degraded_components.append("scam_prefilter")
+        if getattr(threat_result, "degraded", False):
+            degraded_components.append("threat_assessment")
 
     response = ChatResponse(
         reply=reply,
-        tools_invoked=turn_result.get("tools_invoked", []),
-        critic=turn_result.get("critic"),
+        tools_invoked=tools_invoked,
+        critic=critic,
         source_text=raw_text,
         translation=translation_text,
         translation_details=translation_details,
-        detected_language=translation_details.get("detected_language"),
-        target_language=translation_details.get("target_language"),
-        speaker_split=translation_details.get("speaker_split") or [],
-        normalized_prices_vnd=translation_details.get("normalized_prices_vnd") or [],
+        detected_language=(translation_details or {}).get("detected_language"),
+        target_language=(translation_details or {}).get("target_language"),
+        speaker_split=(translation_details or {}).get("speaker_split") or [],
+        normalized_prices_vnd=normalized_prices,
         scam_flags=scam_flags,
         scam_prefilter_status=scam_status,
-        threat=threat_result.to_dict(),
+        threat=threat_payload,
+        input_route=route,
+        needs_retake=needs_retake,
+        retake_reason=retake_reason,
+        price_analysis=price_analysis,
         chunk_sequence_id=request.chunk_sequence_id,
         is_final_chunk=request.is_final_chunk,
         resolved_region=region,
