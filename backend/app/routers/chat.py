@@ -28,6 +28,7 @@ from app.modules.price_comparison import compare_price
 from app.modules.price_intent import PriceIntent, detect_price_intent
 from app.modules.scam_detection import match_scam_pattern
 from app.modules.threat_detection import detect_threat
+from app.modules.transcript_price_extract import extract_priced_items
 from app.modules.translation import resolve_translation_target, translate_text
 from app.schemas.chat import ChatRequest, ChatResponse, TextChatRequest
 
@@ -565,6 +566,147 @@ async def _run_price_text_route(
     }
 
 
+def _analysis_item(item_name: str | None, observed: Any, comparison: dict[str, Any]) -> dict[str, Any]:
+    """Structured price-verdict row (same shape the image/text price routes build)."""
+    return {
+        "item": item_name,
+        "observed_price": int(observed) if isinstance(observed, (int, float)) else None,
+        "reference_price": comparison.get("reference_price"),
+        "reference_price_range": comparison.get("reference_price_range"),
+        "overpriced": bool(comparison.get("flag")),
+        "price_diff_pct": comparison.get("price_diff_pct"),
+        "flag": comparison.get("flag"),
+    }
+
+
+# Native-language templates for the spoken-price overpricing warning appended to
+# the voice reply. Deterministic (no LLM); {item}/{observed}/{reference}/{pct}.
+_PRICE_WARNING_TEMPLATES: dict[str, str] = {
+    "en": (
+        "⚠️ Price check: {item} was quoted at {observed:,.0f}₫, but similar items nearby are "
+        "around {reference:,.0f}₫ (about {pct:.0f}% higher). Consider negotiating or trying another vendor."
+    ),
+    "vi": (
+        "⚠️ Cảnh báo giá: {item} bị hét {observed:,.0f}₫, trong khi giá tham chiếu quanh đây chỉ "
+        "khoảng {reference:,.0f}₫ (cao hơn ~{pct:.0f}%). Bạn nên trả giá hoặc hỏi hàng khác."
+    ),
+    "ko": (
+        "⚠️ 가격 확인: {item} 호가는 {observed:,.0f}₫이지만 주변 시세는 약 {reference:,.0f}₫입니다 "
+        "(약 {pct:.0f}% 높음). 흥정하거나 다른 곳을 확인해 보세요."
+    ),
+    "zh": (
+        "⚠️ 价格提醒：{item} 报价 {observed:,.0f}₫，但附近同类约 {reference:,.0f}₫（高出约 {pct:.0f}%）。"
+        "建议还价或另找一家。"
+    ),
+    "ja": (
+        "⚠️ 価格チェック：{item} の提示額は {observed:,.0f}₫ ですが、周辺の相場は約 {reference:,.0f}₫ です "
+        "（約 {pct:.0f}% 高い）。値切るか別の店を確認しましょう。"
+    ),
+}
+
+
+def _price_warning_note(item: dict[str, Any], native_language: str) -> str | None:
+    """Deterministic overpricing warning in the tourist's language for one item."""
+    observed = item.get("observed_price")
+    reference = item.get("reference_price")
+    pct = item.get("price_diff_pct")
+    if observed is None or reference is None or pct is None:
+        return None
+    template = _PRICE_WARNING_TEMPLATES.get(
+        canonical_language_code(native_language or "en"), _PRICE_WARNING_TEMPLATES["en"]
+    )
+    return template.format(item=item.get("item") or "This item", observed=observed, reference=reference, pct=pct)
+
+
+def _price_flag_text(item: dict[str, Any]) -> str:
+    observed = item.get("observed_price") or 0
+    reference = item.get("reference_price") or 0
+    pct = item.get("price_diff_pct") or 0
+    return f"{item.get('item') or 'item'} {observed:,.0f}₫ vs ~{reference:,.0f}₫ (+{pct:.0f}%)"
+
+
+async def _voice_price_check_inner(text: str, region: str, native_language: str) -> dict[str, Any]:
+    items = await extract_priced_items(text)
+    tools_invoked: list[dict[str, Any]] = []
+    analysis_items: list[dict[str, Any]] = []
+    for pair in items:
+        item_name = pair["item"]
+        observed = pair["price_vnd"]
+        args = {"item": item_name, "region": region, "category": "food", "observed_price": observed}
+        try:
+            comparison = await compare_price(
+                item=item_name, region=region, category="food", observed_price=observed
+            )
+        except Exception:  # noqa: BLE001 - a failed compare must not sink the voice reply
+            comparison = {"error": "compare_failed"}
+        tools_invoked.append({"tool": "compare_price", "arguments": args, "result": comparison})
+        analysis_items.append(_analysis_item(item_name, observed, comparison))
+
+    if not analysis_items:
+        return {
+            "price_analysis": None,
+            "scam_flags": [],
+            "tools_invoked": [],
+            "reply_note": None,
+            "degraded": False,
+            "degradation_reason": None,
+        }
+
+    scam_flags: list[dict[str, Any]] = []
+    reply_note: str | None = None
+    flagged = [item for item in analysis_items if item.get("flag")]
+    if flagged:
+        worst = max(flagged, key=lambda item: item.get("price_diff_pct") or 0.0)
+        diff_pct = float(worst.get("price_diff_pct") or 0.0)
+        scam_flags.append(
+            {
+                "category": "price_scam",
+                "best_score": 0.9 if diff_pct >= 80 else 0.75,
+                "source": "price_comparison",
+                "matched_text": _price_flag_text(worst),
+            }
+        )
+        reply_note = _price_warning_note(worst, native_language)
+
+    price_analysis = {
+        "region": region,
+        "items": analysis_items,
+        "overall_overpriced": any(item.get("overpriced") for item in analysis_items),
+    }
+    return {
+        "price_analysis": price_analysis,
+        "scam_flags": scam_flags,
+        "tools_invoked": tools_invoked,
+        "reply_note": reply_note,
+        "degraded": False,
+        "degradation_reason": None,
+    }
+
+
+async def _run_voice_price_check(text: str, region: str, native_language: str) -> dict[str, Any]:
+    """Voice-route fair-price check: extract (item, price) pairs from the transcript
+    and compare each against local references. Additive to the voice pipeline and
+    never raises — extraction/compare failures degrade to an empty, benign envelope
+    so translation, scam-prefilter, and threat detection are unaffected."""
+    try:
+        return await asyncio.wait_for(
+            _voice_price_check_inner(text, region, native_language),
+            timeout=settings.price_check_deadline_seconds,
+        )
+    except TimeoutError:
+        reason = "price_check_timeout"
+    except Exception:  # noqa: BLE001 - additive check, never blocks the voice reply
+        reason = "price_check_unavailable"
+    return {
+        "price_analysis": None,
+        "scam_flags": [],
+        "tools_invoked": [],
+        "reply_note": None,
+        "degraded": True,
+        "degradation_reason": reason,
+    }
+
+
 async def _persist_chat_turn(
     pool: Any,
     session_id: uuid.UUID,
@@ -742,22 +884,33 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks) -> ChatR
         if image_result.get("degraded"):
             degraded_components.append("image_pipeline")
     elif route == "voice":
-        translation_details, scam_result, threat_result = await asyncio.gather(
+        translation_details, scam_result, threat_result, price_result = await asyncio.gather(
             _translate_for_chat(clean_text, nationality, native_language, context_text, speaker_role),
             _scan_scam_prefilter(clean_text, region=region),
             detect_threat(clean_text, session_id=request.session_id, conversation_context=context_text + [clean_text]),
+            _run_voice_price_check(clean_text, region, native_language),
         )
         scam_flags, scam_status = scam_result
         translation_text = translation_details.get("translated_text")
         reply = translation_text or ""
         normalized_prices = translation_details.get("normalized_prices_vnd") or []
         threat_payload = threat_result.to_dict()
+        # Fair-price check on the spoken price — the voice equivalent of the text/image
+        # Module 2.1 verdict. Adds a price_scam flag + price_analysis + a warning when a
+        # quoted dish is above the local reference, without disturbing translate/scam/threat.
+        scam_flags = _merge_scam_flags(scam_flags, price_result["scam_flags"])
+        price_analysis = price_result["price_analysis"]
+        tools_invoked = price_result["tools_invoked"]
+        if price_result["reply_note"]:
+            reply = f"{reply}\n\n{price_result['reply_note']}" if reply else price_result["reply_note"]
         if translation_details.get("degraded"):
             degraded_components.append("translation")
         if not scam_status.get("qdrant_ok"):
             degraded_components.append("scam_prefilter")
         if getattr(threat_result, "degraded", False):
             degraded_components.append("threat_assessment")
+        if price_result["degraded"]:
+            degraded_components.append("price_check")
     else:  # text
         # Deterministic price-check intent ("bún đậu 200k", "cơm rang 100k có đắt
         # không", "how much is bún đậu?") -> Module 2.1 directly: no Qwen-VL OCR and

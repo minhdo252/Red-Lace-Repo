@@ -89,7 +89,7 @@
     {"id": "W006", "file": "../module13_whisper/audio/w006_sos_request.wav", "reference": "Xin hãy gọi cảnh sát, tôi đang bị giữ lại và không được rời đi.", "max_wer": 0.10, "expected_threat": "CRITICAL", "expected_detected_language": "vi"},
     {"id": "W007", "file": "../module13_whisper/audio/w007_embassy.wav", "reference": "Đại sứ quán Hoa Kỳ ở Hà Nội cách đây bao xa?", "max_wer": 0.10, "expected_threat": "NONE", "expected_detected_language": "vi"},
     {"id": "W008", "file": "../module13_whisper/audio/w008_numbers.wav", "reference": "Số điện thoại của tôi là không chín không ba, một hai ba, bốn năm sáu.", "max_wer": 0.70, "expected_threat": "NONE", "expected_detected_language": "vi"},
-    {"id": "W009", "file": "../module13_whisper/audio/w009_vendor_fast.wav", "reference": "Bún chả này một trăm hai mươi nghìn, đã bao gồm nước và rau rồi.", "max_wer": 0.60, "expected_threat": "NONE", "expected_prices": [120000], "expected_detected_language": "vi"},
+    {"id": "W009", "file": "../module13_whisper/audio/w009_vendor_fast.wav", "reference": "Bún chả này một trăm hai mươi nghìn, đã bao gồm nước và rau rồi.", "max_wer": 0.60, "expected_threat": "NONE", "expected_prices": [120000], "expected_scam": "price_scam", "expected_detected_language": "vi"},
     {"id": "W010", "file": "../module13_whisper/audio/w010_multi_entity.wav", "reference": "Ngày mai tôi đi Sa Pa, cần đặt xe từ Hà Nội lúc sáu giờ sáng.", "max_wer": 0.30, "expected_threat": "NONE", "expected_detected_language": "vi"}
   ],
   "sos_routing_cases": [

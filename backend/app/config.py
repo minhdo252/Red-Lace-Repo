@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     orchestrator_deadline_seconds: int = 12
     threat_deadline_seconds: int = 12
     scam_deadline_seconds: int = 12
+    # Voice-route fair-price check: transcript item/price extraction + compare_price.
+    price_check_deadline_seconds: int = 10
     memory_compression_deadline_seconds: int = 10
 
     # Audio admission limits are checked before and after decoding.

@@ -10,8 +10,8 @@ right route:
   - image -> "image" route (Module 2.1 only: no orchestrator; a price verdict
              via price_analysis, or a needs_retake signal when the menu can't
              be read)
-  - voice -> "voice" route (Module 1 translate + scam + threat; NO orchestrator,
-             so tools_invoked stays empty and the safety envelope is present)
+  - voice -> "voice" route (Module 1 translate + scam + threat + fair-price check;
+             NO orchestrator, so the only tool that may appear is compare_price)
 
 This is a routing test: it asserts the dispatch + envelope shape, which holds in
 both AI_MODE=mock and AI_MODE=live. The real-content assertions (a real price for
@@ -140,8 +140,10 @@ def test_voice_route(sid: str) -> None:
               f"{resp.get('_http_detail', '')[:90]}")
         return
     check("input_route == 'voice'", resp.get("input_route") == "voice", str(resp.get("input_route")))
-    # Voice drops ONLY the orchestrator -> no tool calls come back.
-    check("tools_invoked is empty (no orchestrator)", (resp.get("tools_invoked") or []) == [])
+    # Voice drops the orchestrator -> the only tool that may appear is compare_price,
+    # invoked deterministically by the fair-price check when a spoken price is heard.
+    tools = {t.get("tool") for t in resp.get("tools_invoked") or []}
+    check("no orchestrator tools (only compare_price allowed)", tools <= {"compare_price"}, str(tools))
     # Safety envelope must still be present (this is the W006 SOS path).
     check("threat present (Module 3 ran)", isinstance(resp.get("threat"), dict))
     check("scam_flags present (scam prefilter ran)", isinstance(resp.get("scam_flags"), list))
