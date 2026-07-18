@@ -3,11 +3,27 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
-import { ChevronLeft, Phone, MapPin, Sparkles, ChevronRight, Plus, X, Star } from "lucide-react";
+import {
+  ChevronLeft,
+  Phone,
+  MapPin,
+  Sparkles,
+  ChevronRight,
+  Plus,
+  X,
+  Star,
+  Shield,
+  Ambulance,
+  Flame,
+  Headphones,
+  type LucideIcon,
+} from "lucide-react";
 import { hotlines } from "@/mocks/emergency";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { Button } from "@/components/ui/Button";
 import { useApp, useT } from "@/i18n";
+import { useGeolocation } from "@/lib/hooks";
+import { localeToNativeLanguage, sosRequest, type SosContact } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const toneCls: Record<string, string> = {
@@ -17,18 +33,70 @@ const toneCls: Record<string, string> = {
   hotline: "bg-teal-deep",
 };
 
+/** Map a backend contact `service_type` to a display name + icon + tone. */
+const SERVICE_META: Record<string, { name: string; tone: keyof typeof toneCls; Icon: LucideIcon }> = {
+  police: { name: "Police", tone: "police", Icon: Shield },
+  general_emergency: { name: "Emergency", tone: "police", Icon: Shield },
+  medical: { name: "Ambulance", tone: "ambulance", Icon: Ambulance },
+  fire: { name: "Fire & rescue", tone: "fire", Icon: Flame },
+  tourist_police: { name: "Tourist police", tone: "hotline", Icon: Headphones },
+};
+
+type HotlineRow = {
+  key: string;
+  name: string;
+  number: string;
+  tone: keyof typeof toneCls;
+  Icon: LucideIcon;
+};
+
 type SosNumber = { id: string; name: string; number: string };
 
 export default function SosPage() {
   const t = useT("sos");
   const tc = useT("common");
   const router = useRouter();
-  const { country } = useApp();
+  const { country, locale, ensureSession } = useApp();
+  const { request: requestGeo } = useGeolocation();
 
   const [numbers, setNumbers] = useState<SosNumber[]>([]);
+  const [contacts, setContacts] = useState<SosContact[] | null>(null);
+  const [locationText, setLocationText] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+
+  // Pull live emergency contacts (prioritized hotlines + embassy for the user's
+  // nationality) from the backend, using GPS when granted. Falls back to the
+  // static hotlines rendered below when no backend is configured.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const geo = await requestGeo();
+      const sid = await ensureSession();
+      const env = await sosRequest({
+        session_id: sid,
+        native_language: localeToNativeLanguage(locale),
+        nationality: country.code,
+        lat: geo?.lat,
+        lon: geo?.lon,
+        source: "manual",
+      });
+      if (cancelled) return;
+      if (env.source === "backend" && env.contacts?.length) {
+        setContacts(env.contacts);
+        const loc = env.location_text_en || env.location_text_vi || env.resolved_region;
+        const coords = geo ? `${geo.lat.toFixed(4)}, ${geo.lon.toFixed(4)}` : null;
+        setLocationText([loc, coords].filter(Boolean).join(" · ") || null);
+      } else if (geo) {
+        setLocationText(`${geo.lat.toFixed(4)}, ${geo.lon.toFixed(4)}`);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // hydrate saved numbers from this device
   useEffect(() => {
@@ -60,7 +128,34 @@ export default function SosPage() {
 
   const removeNumber = (id: string) => persist(numbers.filter((c) => c.id !== id));
 
-  const call = () => router.push("/sos/call");
+  const embassyContact =
+    contacts?.find((c) => c.service_type === "embassy" || c.country_name) ?? null;
+  const embassyName = embassyContact?.country_name || country.embassy;
+  const embassyPhone = embassyContact?.phone_number || country.embassyPhone;
+  const rows: HotlineRow[] = contacts
+    ? contacts
+        .filter((c) => c !== embassyContact)
+        .map((c, i) => {
+          const meta =
+            SERVICE_META[c.service_type] ??
+            ({ name: c.service_type, tone: "hotline" as const, Icon: Headphones });
+          return {
+            key: `${c.service_type}-${i}`,
+            name: meta.name,
+            number: c.phone_number,
+            tone: meta.tone,
+            Icon: meta.Icon,
+          };
+        })
+    : hotlines.map((h) => ({
+        key: h.id,
+        name: h.name,
+        number: h.number,
+        tone: h.tone,
+        Icon: h.icon,
+      }));
+
+  const dial = (n: string) => `tel:${n.replace(/[^0-9+]/g, "")}`;
 
   return (
     <div
@@ -94,13 +189,13 @@ export default function SosPage() {
 
         {/* primary hotlines */}
         <div className="mt-4 space-y-3">
-          {hotlines.map((h, i) => (
-            <motion.button
-              key={h.id}
+          {rows.map((h, i) => (
+            <motion.a
+              key={h.key}
+              href={dial(h.number)}
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.05 }}
-              onClick={call}
               className="flex w-full items-center gap-4 rounded-2xl bg-white/8 p-4 text-left backdrop-blur-sm transition-transform active:scale-[0.98]"
             >
               <span
@@ -109,7 +204,7 @@ export default function SosPage() {
                   toneCls[h.tone],
                 )}
               >
-                <h.icon size={26} />
+                <h.Icon size={26} />
               </span>
               <div className="flex-1">
                 <p className="font-display text-lg font-bold">{h.name}</p>
@@ -118,13 +213,13 @@ export default function SosPage() {
               <span className="grid h-11 w-11 place-items-center rounded-full bg-teal text-[#0f231d]">
                 <Phone size={20} fill="currentColor" />
               </span>
-            </motion.button>
+            </motion.a>
           ))}
         </div>
 
         {/* embassy */}
-        <button
-          onClick={call}
+        <a
+          href={dial(embassyPhone)}
           className="mt-3 flex w-full items-center gap-4 rounded-2xl bg-white/8 p-4 text-left backdrop-blur-sm transition-transform active:scale-[0.98]"
         >
           <span className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-white/12 text-3xl">
@@ -132,19 +227,21 @@ export default function SosPage() {
           </span>
           <div className="min-w-0 flex-1">
             <p className="font-display text-lg font-bold">{t.embassy}</p>
-            <p className="truncate text-sm text-white/55">{country.embassy}</p>
+            <p className="truncate text-sm text-white/55">{embassyName}</p>
           </div>
           <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-teal text-[#0f231d]">
             <Phone size={20} fill="currentColor" />
           </span>
-        </button>
+        </a>
 
         {/* share location */}
         <div className="mt-3 flex items-center gap-3 rounded-2xl bg-white/6 p-4">
           <MapPin size={20} className="shrink-0 text-teal" />
           <div className="flex-1">
             <p className="font-semibold">{t.shareLocation}</p>
-            <p className="text-xs text-white/50">Hoàn Kiếm, Hà Nội · 21.0287, 105.8524</p>
+            <p className="text-xs text-white/50">
+              {locationText ?? "Hoàn Kiếm, Hà Nội · 21.0287, 105.8524"}
+            </p>
           </div>
           <ChevronRight size={18} className="text-white/40" />
         </div>

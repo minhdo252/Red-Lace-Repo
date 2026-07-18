@@ -17,6 +17,13 @@ import {
   type AssistantMessage,
   type AssistantAction,
 } from "@/mocks/assistant";
+import {
+  blobToBase64,
+  chatRequest,
+  fileToBase64,
+  localeToNativeLanguage,
+  toAssistantMessage,
+} from "@/lib/api";
 
 type Phase = "home" | "thinking" | "chat";
 
@@ -26,7 +33,7 @@ const nextId = (p: string) => `${p}-${++uid}`;
 export default function HomePage() {
   const t = useT("assistant");
   const ht = useT("home");
-  const { name } = useApp();
+  const { name, locale, country, ensureSession } = useApp();
   const router = useRouter();
 
   const [phase, setPhase] = useState<Phase>("home");
@@ -36,19 +43,67 @@ export default function HomePage() {
   const [listening, setListening] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
 
   const scrollEnd = () =>
     requestAnimationFrame(() =>
       scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }),
     );
 
-  const run = async (thread: AssistantMessage[]) => {
-    const [userMsg, ...rest] = thread;
+  const historyFromMessages = (msgs: AssistantMessage[]) =>
+    msgs
+      .filter((m) => m.text)
+      .slice(-10)
+      .map((m) => ({
+        role: m.role === "ai" ? ("assistant" as const) : ("user" as const),
+        content: m.text,
+      }));
+
+  /**
+   * Append the user's message, run the real backend turn (POST /api/chat), then
+   * append the AI reply. Keeps the same phase machine + animation the scripted
+   * `run()` had, but sources the reply from the backend — falling back to
+   * `fallbackAi()` (the original mock thread) when no backend is configured.
+   */
+  const send = async (
+    userMsg: AssistantMessage,
+    payload: {
+      text?: string;
+      audio_base64?: string;
+      audio_format?: string;
+      images?: { image_base64: string; mode: string }[];
+    },
+    fallbackAi: () => AssistantMessage[],
+    updateUserFromTranscript = false,
+  ) => {
+    const priorHistory = historyFromMessages(messages);
     setMessages((m) => [...m, userMsg]);
     setPhase("thinking");
     scrollEnd();
-    await delay(1500);
-    setMessages((m) => [...m, ...rest]);
+
+    const sessionId = await ensureSession();
+    const env = await chatRequest({
+      session_id: sessionId,
+      native_language: localeToNativeLanguage(locale),
+      nationality: country.code,
+      speaker_role: "tourist",
+      history: priorHistory,
+      ...payload,
+    });
+
+    let aiMsgs: AssistantMessage[];
+    if (env.source === "backend") {
+      if (updateUserFromTranscript && env.source_text) {
+        const transcript = env.source_text;
+        setMessages((m) => m.map((x) => (x.id === userMsg.id ? { ...x, text: transcript } : x)));
+      }
+      aiMsgs = [toAssistantMessage(env, nextId("a"))];
+    } else {
+      await delay(1200); // keep the "thinking" beat so mock mode still feels alive
+      aiMsgs = fallbackAi().map((m) => ({ ...m, id: nextId("a") }));
+    }
+    setMessages((m) => [...m, ...aiMsgs]);
     setPhase("chat");
     scrollEnd();
   };
@@ -57,26 +112,87 @@ export default function HomePage() {
     const q = input.trim();
     if (!q) return;
     setInput("");
-    const reply = routeThread(q);
-    run([{ id: nextId("u"), role: "user", text: q }, ...reply.slice(1).map((m) => ({ ...m, id: nextId("a") }))]);
+    const userMsg: AssistantMessage = { id: nextId("u"), role: "user", text: q };
+    void send(userMsg, { text: q }, () => routeThread(q).slice(1));
   };
+
+  const startRecording = async (): Promise<boolean> => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const rec = new MediaRecorder(stream);
+      chunksRef.current = [];
+      rec.ondataavailable = (e) => {
+        if (e.data.size) chunksRef.current.push(e.data);
+      };
+      rec.start();
+      recorderRef.current = rec;
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const stopRecording = (): Promise<Blob | null> =>
+    new Promise((resolve) => {
+      const rec = recorderRef.current;
+      if (!rec) return resolve(null);
+      rec.onstop = () => {
+        rec.stream.getTracks().forEach((tr) => tr.stop());
+        resolve(new Blob(chunksRef.current, { type: rec.mimeType || "audio/webm" }));
+      };
+      rec.stop();
+      recorderRef.current = null;
+    });
 
   const onMic = async () => {
-    if (listening || phase === "thinking") return;
+    if (phase === "thinking") return;
+    // Second tap: stop recording and send the captured audio.
+    if (listening) {
+      setListening(false);
+      const blob = await stopRecording();
+      if (!blob || !blob.size) {
+        void send(
+          { id: nextId("u"), role: "user", text: taxiThread[0].text },
+          { text: taxiThread[0].text },
+          () => taxiThread.slice(1),
+        );
+        return;
+      }
+      const audioBase64 = await blobToBase64(blob);
+      const fmt = blob.type.includes("ogg") ? "ogg" : "webm";
+      void send(
+        { id: nextId("u"), role: "user", text: "🎤 …" },
+        { audio_base64: audioBase64, audio_format: fmt },
+        () => taxiThread.slice(1),
+        true,
+      );
+      return;
+    }
+    // First tap: begin recording (fall back to the scripted demo if no mic).
+    const ok = await startRecording();
+    if (!ok) {
+      setListening(true);
+      await delay(1300);
+      setListening(false);
+      void send(
+        { id: nextId("u"), role: "user", text: taxiThread[0].text },
+        { text: taxiThread[0].text },
+        () => taxiThread.slice(1),
+      );
+      return;
+    }
     setListening(true);
-    await delay(1300);
-    setListening(false);
-    run(taxiThread.map((m, i) => ({ ...m, id: nextId(i === 0 ? "u" : "a") })));
   };
 
-  const onPickPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onPickPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const url = URL.createObjectURL(file);
     e.target.value = "";
-    run([
-      { id: nextId("u"), role: "user", text: "", image: url },
-      { ...photoScanReply, id: nextId("a") },
+    const base64 = await fileToBase64(file);
+    const userMsg: AssistantMessage = { id: nextId("u"), role: "user", text: "", image: url };
+    void send(userMsg, { text: "", images: [{ image_base64: base64, mode: "receipt" }] }, () => [
+      photoScanReply,
     ]);
   };
 
