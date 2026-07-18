@@ -33,6 +33,86 @@ async def ensure_runtime_schema() -> None:
     """
     pool = get_pool()
     async with pool.acquire() as conn:
+        # Base tables. Docker's init.sql only runs on a brand-new Postgres volume;
+        # a managed Postgres (e.g. Railway) runs no init.sql at all, so the base
+        # tables must be created here as well or the ALTER/INSERT statements below
+        # fail on a fresh database. All idempotent — statements are verbatim from
+        # db/init.sql, kept in sync with it.
+        await conn.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sessions (
+                id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                native_language TEXT NOT NULL,
+                nationality     TEXT NOT NULL,
+                compressed_history JSONB,
+                created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS geo_regions (
+                id          SERIAL PRIMARY KEY,
+                city        TEXT NOT NULL,
+                zone_name   TEXT NOT NULL,
+                center_lat  DOUBLE PRECISION NOT NULL,
+                center_lon  DOUBLE PRECISION NOT NULL,
+                radius_km   DOUBLE PRECISION NOT NULL DEFAULT 3.0,
+                UNIQUE (city, zone_name)
+            )
+            """
+        )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS price_references (
+                id           SERIAL PRIMARY KEY,
+                item_name    TEXT NOT NULL,
+                region       TEXT NOT NULL,
+                category     TEXT NOT NULL DEFAULT 'general',
+                price_vnd    DOUBLE PRECISION,
+                mu_post      DOUBLE PRECISION,
+                tau_post     DOUBLE PRECISION,
+                sigma_data   DOUBLE PRECISION NOT NULL DEFAULT 0.3,
+                n            INTEGER NOT NULL DEFAULT 0,
+                sum_y        DOUBLE PRECISION NOT NULL DEFAULT 0,
+                created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_price_references_region ON price_references (region)"
+        )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS emergency_hotlines (
+                id           SERIAL PRIMARY KEY,
+                region       TEXT NOT NULL,
+                service_type TEXT NOT NULL,
+                phone_number TEXT NOT NULL,
+                notes        TEXT,
+                source_url   TEXT,
+                verified_at TIMESTAMPTZ,
+                verification_status TEXT NOT NULL DEFAULT 'unverified'
+            )
+            """
+        )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS embassies (
+                id           SERIAL PRIMARY KEY,
+                nationality  TEXT NOT NULL,
+                country_name TEXT NOT NULL,
+                phone_number TEXT NOT NULL,
+                address      TEXT,
+                region_hint  TEXT,
+                source_url   TEXT,
+                verified_at TIMESTAMPTZ,
+                verification_status TEXT NOT NULL DEFAULT 'unverified'
+            )
+            """
+        )
         await conn.execute("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS compressed_history JSONB")
         await conn.execute(
             """

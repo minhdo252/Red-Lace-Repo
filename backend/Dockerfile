@@ -31,4 +31,6 @@ USER pwuser
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Bind the port Railway/host injects via $PORT (falls back to 8000 for local/compose).
+# Shell form so ${PORT} is expanded at runtime. No --reload in production.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
