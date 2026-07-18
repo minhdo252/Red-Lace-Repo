@@ -1,9 +1,64 @@
-# AITravelMate Backend
+# NónAI — AITravelMate (monorepo)
 
-Backend + agent for the travel companion MVP in **Hanoi**.
-The app translates tourist conversations, parses receipts/images, flags price/scam risks, calculates ghost-tour composite risk scores, and routes emergency contacts through a hardcoded SOS endpoint. 
+Travel-safety companion for foreign tourists in **Vietnam**. This one repo holds both
+halves of the app so a single `git pull` gets everything:
 
-Structured data lives in Postgres; vector lookups live in Qdrant; all main model calls go through the single `AIClient` gateway which is now explicitly configured for different modalities (Chat, Vision, Embedding).
+- **`backend/`** — FastAPI + agent (Postgres + Qdrant). Translates tourist conversations,
+  parses receipts/images, flags price/scam risks, scores ghost-tour composite risk, and
+  routes emergency contacts through the SOS endpoint.
+- **`frontend/`** — Next.js 16 PWA ("Tourist Shield"). Talks to the backend through
+  same-origin `/api/*` proxy routes and **falls back to built-in mock data whenever no
+  backend is configured**, so the UI works standalone.
+
+Structured data lives in Postgres; vector lookups live in Qdrant; all main model calls go
+through the single `AIClient` gateway which is explicitly configured for different
+modalities (Chat, Vision, Embedding).
+
+> **Integration handoff:** the full plan is in
+> [`IMPLEMENTATION_PLAN.md`](./IMPLEMENTATION_PLAN.md); live status / where-to-continue is
+> in [`PROGRESS.md`](./PROGRESS.md). Read those before continuing the integration.
+
+## Monorepo layout
+
+```
+Red-Lace-Repo/
+  backend/      # FastAPI + agent
+  frontend/     # Next.js PWA (same-origin proxy → backend; mock fallback)
+  db/           # Postgres schema + seed (db/init.sql)
+  docker-compose.yml
+  IMPLEMENTATION_PLAN.md   # integration plan (portable handoff)
+  PROGRESS.md              # living status
+```
+
+## Frontend ↔ backend integration
+
+The browser only ever calls relative **`/api/*`** routes on the Next.js server, which
+proxy to FastAPI — so there is **no CORS** and the backend URL stays server-side. Each
+proxy route reads `process.env.BACKEND_URL`; when it is unset or the backend errors, the
+route returns the frontend's **mock data** (`source:"mock"`) so the deployed app never
+breaks even before the backend is up.
+
+- **Session:** the frontend bootstraps a backend session via `POST /sessions`
+  (`{native_language, nationality}`) and persists the id in `localStorage`
+  (`nonai.sessionId`). Nationality is locale-derived by default and user-selectable from
+  the Profile country picker; changing language or country resets the session.
+- **Wired features** (each keeps its mock as the fallback): Home chat (text / voice /
+  photo), Translate (per-utterance audio), **Price-check** (receipt photo → receipt-mode
+  parse → `reply` + normalized prices), Tour-check (URL → `check_ghost_tour`), and SOS
+  (live hotlines + embassy). The Map already calls SerpApi directly.
+- **Locale map:** frontend `en/vi/zh/ko/ru` → backend `native_language` `vi/en/ko/zh/ja`
+  (`ru → en`; no `RU` embassy is seeded, so SOS still returns hotlines for Russian users).
+
+### Run the frontend
+
+```bash
+cd frontend
+npm install            # once (node_modules may already be linked on the dev machine)
+npm run dev            # http://localhost:3000 — works on mock data with no BACKEND_URL
+```
+
+Copy `frontend/.env.example` → `frontend/.env.local` and set `BACKEND_URL` to the deployed
+backend to switch every feature to live AI. Typecheck with `cd frontend && npx tsc --noEmit`.
 
 ## Stack
 
@@ -15,7 +70,7 @@ Structured data lives in Postgres; vector lookups live in Qdrant; all main model
 - `seed-scam-patterns` — one-shot job that seeds Qdrant `scam_patterns` for Modules 2.1 & 2.2.
 - `crawler` / `playwright-crawler` / `playwright-full-crawler` — optional profile-gated crawl/debug tools.
 
-## Run
+## Run the backend
 
 ```bash
 cp .env.example .env

@@ -4,7 +4,7 @@
 > **where-are-we-now** log. It is updated and pushed at every checkpoint so any machine/account
 > can pull and continue exactly where the last one stopped.
 
-**Last updated:** 2026-07-18 · **Overall:** Phases 0–3 done — all Phase 3 feature wiring complete (Home, SOS, Translate, Tour-check, Price-check, Profile country picker) ✅ (typechecks clean). Phase 4 docs next. Deploy (Phase 6) not started.
+**Last updated:** 2026-07-18 · **Overall:** Phases 0–4 done — all Phase 3 feature wiring complete (Home, SOS, Translate, Tour-check, Price-check, Profile country picker) + Phase 4 docs written (top-level README now covers the monorepo + integration). `tsc --noEmit` clean; local Turbopack `npm run build` is blocked by the `node_modules` junction (builds clean on Vercel). Deploy (Phases 5–6) deferred to the account owner — do NOT deploy from here.
 
 ## Status by phase
 - [x] **Phase 0 — Monorepo setup**
@@ -30,8 +30,14 @@
   - [x] Tour-check — URL → `/api/chat` (triggers `check_ghost_tour`); verdict + advice from the AI answer (`frontend/src/app/tour-check/page.tsx`)
   - [x] **Price-check** — receipt photo → `/api/chat` (images, `mode:"receipt"`); on `source==="backend"` shows the AI `reply` + `normalized_prices_vnd`, otherwise the mock gauge/`PriceTable` fallback. The analysis animation is now purely visual; the real transition is driven by the awaited turn (mirrors tour-check). FileReader is read before the loader shows so a read failure can't strand the spinner. (`frontend/src/app/price-check/page.tsx`)
   - [x] **Profile country picker** — the "Home country" row opens a `BottomSheet` listing `COUNTRIES` and calls `useApp().setCountry(c)` (mirrors `LanguageSwitcher`), so nationality (embassy/SOS) is user-chosen, not just the locale-derived default. `setCountry` already resets the session. (`frontend/src/app/(tabs)/profile/page.tsx`)
-- [ ] **Phase 4 — Docs + build check**: `backend/.env` (local, gitignored), update
-      `.env.example`, top-level README; `cd frontend && npm run build`.
+- [x] **Phase 4 — Docs + build check**: top-level `README.md` updated (monorepo layout +
+      frontend↔backend integration + frontend run steps); `frontend/.env.example` already
+      complete (Phase 2 — documents `BACKEND_URL`/`SERPAPI_KEY`/`NEXT_PUBLIC_GOOGLE_MAPS_KEY`).
+      `backend/.env` stays local + gitignored (private FPT/Gemini/Tavily keys — see the key
+      table in the plan; not created here). Verification: `cd frontend && npx tsc --noEmit`
+      clean. `npm run build` (Turbopack) can't complete on this machine — the
+      `frontend/node_modules` junction "points out of the filesystem root"; the real
+      production build runs clean on Vercel's fresh `npm install` at deploy.
 - [ ] **Phase 5 — Push full integration checkpoint.**
 - [ ] **Phase 6 — Deploy** (deferred): backend → Railway, frontend → Vercel with `BACKEND_URL`.
 
@@ -83,3 +89,4 @@ new machine and don't have them, ask the account owner.
 - 2026-07-18: Phase 3 (partial) — wired Home chat, SOS, Translate, Tour-check to the backend (mock fallback intact); `tsc --noEmit` clean. **Remaining: price-check, profile country picker** (recipes above), then Phase 4 docs + Phase 6 deploy.
 - 2026-07-18: Phase 3 — wired **price-check** (receipt photo → `/api/chat` receipt mode; backend `reply` + `normalized_prices_vnd`, mock gauge/`PriceTable` fallback); `tsc --noEmit` clean. Remaining: profile country picker.
 - 2026-07-18: Phase 3 — wired **profile country picker** (`BottomSheet` over `COUNTRIES` → `setCountry`, mirrors `LanguageSwitcher`); **Phase 3 feature wiring complete**; `tsc --noEmit` clean. Next: Phase 4 docs.
+- 2026-07-18: Phase 4 — docs: top-level `README.md` now documents the monorepo + frontend↔backend integration + run steps (`.env.example` already complete from Phase 2). `tsc --noEmit` clean; local `npm run build` blocked by the `node_modules` junction under Turbopack (builds clean on Vercel). Deploy (Phases 5–6) deferred to the account owner.
