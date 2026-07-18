@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     ai_request_timeout_seconds: int = 60
 
     google_places_api_key: str | None = None
+    # Server-side-only escape hatch for check_business_existence() while the
+    # real Google Places key/project is being sorted out — never settable
+    # from a client request, only from the process environment (see
+    # app/modules/business_check.py for the banner/logging this triggers).
+    mock_google_places: bool = False
 
 
 settings = Settings()

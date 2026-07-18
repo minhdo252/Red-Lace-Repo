@@ -5,6 +5,15 @@ user-clicked shortcut only (see app/routers/sos.py) — the hard safety rule
 is enforced structurally: the agent has no way to call it even if a live
 model hallucinates the tool name, because call_tool() only recognizes
 the names below.
+
+check_ghost_tour (module 2.2, doc section 7) is a composite tool that runs
+the 5 underlying ghost-tour signals itself and returns one weighted
+breakdown, rather than leaving the model to call check_domain_age /
+check_business_existence / estimate_fair_price / match_scam_pattern
+separately and average them by hand — the weighting is a deterministic
+calculation (app/modules/ghost_tour_score.py), not something that should
+vary turn to turn based on how a model happens to add up five numbers.
+The individual tools stay available too, for narrower one-off questions.
 """
 
 from __future__ import annotations
@@ -14,6 +23,7 @@ from typing import Any, Awaitable, Callable
 
 from app.modules.business_check import check_business_existence
 from app.modules.domain_check import check_domain_age
+from app.modules.ghost_tour_score import check_ghost_tour
 from app.modules.image_reader import read_image
 from app.modules.pricing import estimate_fair_price
 from app.modules.scam_detection import match_scam_pattern
@@ -25,8 +35,8 @@ TOOL_SPECS: list[dict[str, Any]] = [
         "description": (
             "Estimate whether an observed price is fair for an item in a region using "
             "Bayesian fusion of an LLM prior and historical data. Only ever raises a "
-            "'higher than reference' flag with a confidence level — never concludes "
-            "scam or not-scam on its own."
+            "'higher than reference' or 'suspiciously low / bait price' flag with a "
+            "confidence level — never concludes scam or not-scam on its own."
         ),
         "parameters": {
             "type": "object",
@@ -46,7 +56,10 @@ TOOL_SPECS: list[dict[str, Any]] = [
         "description": (
             "Read an image and return structured text. mode=receipt|dish reads a "
             "bill/menu/dish photo; mode=page_transparency reads a Facebook Page "
-            "Transparency screenshot; mode=chat_screenshot reads a suspicious DM screenshot."
+            "Transparency screenshot; mode=chat_screenshot reads a suspicious DM screenshot. "
+            "Note: images attached to the current turn are already read automatically before "
+            "you see this turn — only call this yourself if the user references an image from "
+            "earlier in the conversation that hasn't been read yet."
         ),
         "parameters": {
             "type": "object",
@@ -92,6 +105,40 @@ TOOL_SPECS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "check_ghost_tour",
+        "description": (
+            "Run the full ghost-tour/homestay-scam composite check (doc section 7): combines "
+            "whatever of domain age, a Page Transparency read, Google Places existence, price "
+            "anomaly, and scam-pressure-language matching is available for this business/tour, "
+            "and returns a weighted trust-score breakdown. Call this instead of the individual "
+            "signal tools whenever the user is asking 'is this tour/homestay legit'. Never "
+            "concludes scam on its own — always present the breakdown, not just the number.\n"
+            "region is OPTIONAL — only the price check needs it, and that signal just reports "
+            "itself unavailable (with a reason) if region is missing; every other signal works "
+            "fine without it. Call this tool with whatever you actually have (even just a bare "
+            "url, e.g. a Facebook link with no visible name/region) instead of asking the user "
+            "for more information first — omit fields you don't have rather than filling them "
+            "with a placeholder like 'N/A' or 'not provided', which would be read as real input."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "region": {"type": "string", "description": "Optional — only used by the price check."},
+                "name": {"type": "string", "description": "Business/tour/homestay name, for the Google Places check."},
+                "url": {"type": "string", "description": "Website/Facebook URL, for the WHOIS domain-age check."},
+                "item": {"type": "string", "description": "What was priced (e.g. 'homestay 1 night'), for the price check."},
+                "observed_price": {"type": "number", "description": "Observed/quoted price in VND, for the price check."},
+                "suspicious_text": {
+                    "type": "string",
+                    "description": "Any pressure-sounding text from the seller, for scam-pattern matching.",
+                },
+            },
+            # No field is unconditionally required — but at least one of
+            # url/name has to be present or there's nothing to check at all.
+            "anyOf": [{"required": ["url"]}, {"required": ["name"]}],
+        },
+    },
+    {
         "name": "translate_or_get_hotline",
         "description": (
             "Translate text and look up emergency hotlines (by region) and embassy "
@@ -125,6 +172,7 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] 
     "match_scam_pattern": lambda args: match_scam_pattern(**args),
     "check_domain_age": lambda args: check_domain_age(**args),
     "check_business_existence": lambda args: check_business_existence(**args),
+    "check_ghost_tour": lambda args: check_ghost_tour(**args),
     "translate_or_get_hotline": lambda args: translate_or_get_hotline(**args),
 }
 

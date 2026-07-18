@@ -2,6 +2,19 @@
 
 Log-space Normal-Normal conjugate fusion of an LLM-elicited prior
 (p10/p50/p90 + confidence) with real observed data points, updated online.
+
+`price_direction` ("high" / "low" / "normal") additionally powers module 2.2
+signal 4 (doc section 7): a price far *below* the reference ("low") is reused
+as a "bait price" caution signal for the ghost-tour/homestay composite score
+(app/modules/ghost_tour_score.py) — the mirror image of the "high" (ripoff)
+flag module 2.1 already used this tool for.
+
+Both directions use the same Z90 threshold (90th/10th percentile of the
+modeled fair-price distribution), symmetric on purpose: there's no labeled
+data yet showing bait-pricing needs a stricter or looser cutoff than
+overpricing does, so picking a different constant for "low" would just be
+an arbitrary asymmetry dressed up as precision. Revisit once real flagged
+cases (either direction) accumulate.
 """
 
 from __future__ import annotations
@@ -111,11 +124,22 @@ async def estimate_fair_price(item: str, region: str, observed_price: float | No
         result["observed_price"] = observed_price
         result["z_score"] = round(z, 2)
         result["percentile"] = round(percentile, 1)
-        result["flag"] = (
-            f"cao hơn mức tham khảo (percentile {percentile:.0f}%), độ tin cậy dựa trên {n} điểm dữ liệu"
-            if z > Z90
-            else None
-        )
+
+        if z > Z90:
+            result["price_direction"] = "high"
+            result["flag"] = (
+                f"cao hơn mức tham khảo (percentile {percentile:.0f}%), "
+                f"độ tin cậy dựa trên {n} điểm dữ liệu"
+            )
+        elif z < -Z90:
+            result["price_direction"] = "low"
+            result["flag"] = (
+                f"giá thấp bất thường so với mặt bằng (percentile {percentile:.0f}%), "
+                f"cẩn trọng mồi câu giá rẻ — độ tin cậy dựa trên {n} điểm dữ liệu"
+            )
+        else:
+            result["price_direction"] = "normal"
+            result["flag"] = None
 
     return result
 

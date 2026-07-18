@@ -4,6 +4,14 @@ Deliberately not a multi-agent swarm: one model loop that calls tools and
 reasons over their results, with a critic pass gating any risk conclusion,
 and a hard safety rule that keeps emergency dialing out of the agent's reach
 entirely (trigger_sos is not in its tool set — see app/agent/tools.py).
+
+Images (module 2.1 receipts/dishes, module 2.2 Page Transparency
+screenshots — doc section 7, signal 2) are read via read_image() *before*
+the tool-calling loop starts, not left for the model to request as a
+tool call: a model has no way to "type back" raw image bytes it was never
+actually shown as text, so read_image can't realistically be a model-
+initiated tool call for image *input*. The already-computed results are
+injected into the conversation as context instead.
 """
 
 from __future__ import annotations
@@ -31,6 +39,15 @@ always use the tools for that.
 Hard safety rule: you have no way to place emergency calls or contact authorities \
 yourself, and must never claim otherwise. If risk looks high, say so and suggest the \
 user tap the SOS button in the app — the call itself always requires their tap.
+
+check_ghost_tour returns two independent layers — do not treat a mismatch between \
+them as an error or something to point out as confusing: risk_level (low/medium/high/ \
+insufficient_data) is an internal multi-level score; safety.label (An toàn/Không an \
+toàn) is a separate binary display label driven by its own fixed rule (business found \
+with nothing else triggered = An toàn; anything else = Không an toàn with its own \
+reasons). They are allowed to disagree — e.g. risk_level=medium alongside \
+safety.label=Không an toàn is normal, not a bug. When telling the user whether \
+something looks safe, defer to safety.label and its reasons, not to risk_level.
 """
 
 
