@@ -4,7 +4,11 @@
 > **where-are-we-now** log. It is updated and pushed at every checkpoint so any machine/account
 > can pull and continue exactly where the last one stopped.
 
-**Last updated:** 2026-07-18 · **Overall:** Phases 0–5 done — Phase 3 feature wiring complete (Home, SOS, Translate, Tour-check, Price-check, Profile country picker) + Phase 4 docs + **Phase 5 pushed** (all Phase 0–4 commits verified on `origin/main`, remote `main` == local `37bbddf`). `tsc --noEmit` clean; local Turbopack `npm run build` is blocked by the `node_modules` junction (builds clean on Vercel). **Phase 6 (deploy) is BLOCKED on two owner-only prerequisites** (see Blockers): interactive `railway login` (this session can't drive a browser OAuth) **and** the private FPT/Gemini/Tavily API keys (not present on this machine — `backend/.env` is absent). No Railway URL exists yet, so `BACKEND_URL` can't be set on Vercel. Nothing is deployed.
+**Last updated:** 2026-07-18 · **Overall:** **ALL PHASES DONE — DEPLOYED & LIVE.** Phases 0–4 (integration) + Phase 5 (pushed) + **Phase 6 (deploy) complete**. Backend is live on **Railway** with real AI (`AI_MODE=live`, GLM-5.2 + Qwen-VL + Whisper + VN-embedding via FPT Cloud), Postgres, and Qdrant; frontend is live on **Vercel** wired to it through `BACKEND_URL`.
+> - **Frontend (production):** https://nonai-three.vercel.app
+> - **Backend (Railway):** https://nonai-backend-production.up.railway.app  (`/health` → `{"status":"ok"}`)
+>
+> Verified end-to-end on the live site: `POST /api/session` → real UUID (`source:"backend"`); `POST /api/chat` → real GLM reply (`source:"backend"`); `POST /api/sos` → 6 prioritized hotlines + correct embassy (`source:"backend"`); `GET /api/nearby` → `source:"serpapi"`. With `BACKEND_URL` unset every screen still falls back to mock.
 
 ## Status by phase
 - [x] **Phase 0 — Monorepo setup**
@@ -40,11 +44,9 @@
       production build runs clean on Vercel's fresh `npm install` at deploy.
 - [x] **Phase 5 — Push full integration checkpoint.** All Phase 0–4 commits are on `origin/main`
       (verified: remote `main` == local `37bbddf`; `FETCH_HEAD..HEAD` empty).
-- [ ] **Phase 6 — Deploy** — **BLOCKED, needs the account owner** (see Blockers). Backend → Railway
-      requires interactive `railway login` + the private FPT/Gemini/Tavily keys (neither available to a
-      non-interactive session with no `backend/.env`). Frontend → Vercel is otherwise ready (CLI
-      authed as `minh070607`, project linked, `SERPAPI_KEY` present) but `BACKEND_URL` can't be set
-      until the Railway URL exists. Nothing is deployed.
+- [x] **Phase 6 — Deploy — DONE.** Backend → **Railway** (project `nonai-backend`), frontend →
+      **Vercel** (`nonai`), wired via `BACKEND_URL`. See the "Deployment" section below for the full
+      topology, URLs, and how to redeploy.
 
 ## API keys — status
 The account owner supplied FPT Cloud keys (GLM chat, Qwen-VL vision, Whisper STT, VN embedding),
@@ -82,32 +84,42 @@ new machine and don't have them, ask the account owner.
 > `frontend/README` notes / top-level README). **Do NOT deploy** — the owner deploys from another
 > account. Use PowerShell, and the git push command in PROGRESS.md's environment notes.
 
-## Blockers / needs the account owner
-Phase 6 confirmed blocked on **owner-only** prerequisites (a non-interactive assistant session cannot
-clear these). Exact remediation:
+## Deployment (Phase 6 — LIVE)
 
-1. **Interactive `railway login`.** The Railway CLI auth is a browser OAuth flow; it can't be driven
-   headlessly here. On the owner's machine: `npm i -g @railway/cli` (CLI isn't installed), then
-   `railway login` (or `railway login --browserless` and open the printed URL). Alternatively, create
-   a project token in the Railway dashboard and export `RAILWAY_TOKEN` for CI-style non-interactive use.
-2. **Private API keys are not on this machine.** `backend/.env` is absent and no FPT Cloud / Gemini /
-   Tavily key material exists locally, so `AI_MODE=live` can't be configured from here. The owner must
-   supply the values and set the Railway env vars using **both** the split + legacy names (plan
-   finding #2 table): `AI_CHAT_API_KEY`+`GLM_API_KEY`, `AI_VISION_API_KEY`+`QWEN_VL_API_KEY`,
-   `AI_EMBED_API_KEY`+`VN_EMBEDDING_API_KEY`, `AI_STT_API_KEY`+`WHISPER_V3_API_KEY`, plus
-   `GEMINI_API_KEY`, `TAVILY_API_KEY`, and `AI_MODE=live`,
-   `AI_BASE_URL=https://mkp-api.fptcloud.com`, `POSTGRES_DSN`, `QDRANT_URL`, `EMBEDDING_DIM=1024`,
-   `MOCK_GOOGLE_PLACES=true`.
-3. **`psql` isn't installed** for the one-time schema load (`psql "$DATABASE_URL" -f db/init.sql`).
-   Install `psql`, or run it via `railway run psql ...`, or use the Railway Postgres data console.
-4. **Seed jobs** (`python -m app.agent.seed_scam_patterns`, `python -m app.agent.seed_price_references`)
-   run once against the deployed DB/Qdrant after the backend deps are installed (Docker/Railway env).
-5. **Vercel is ready except `BACKEND_URL`.** CLI is authed (`minh070607`), `frontend/.vercel` is linked
-   to `nonai` (`prj_nHImfGpuP8LHiiAVmvlMXKS9mH9I` / `team_cdmOkWuR97A5rxthTxrn8VaE`), and `SERPAPI_KEY`
-   is set locally. Once the Railway URL exists: set `BACKEND_URL` (Production + Preview) + `SERPAPI_KEY`,
-   then `cd frontend && npx vercel --prod --yes --scope mdsat-s-projects`. Note the live
-   `nonai-three.vercel.app` currently serves the **pre-integration** frontend; this deploy ships the
-   integration build (works on mock when `BACKEND_URL` is unset).
+**URLs**
+- Frontend (Vercel `nonai`, prod): **https://nonai-three.vercel.app**
+- Backend (Railway `nonai-backend`, prod): **https://nonai-backend-production.up.railway.app**
+
+**Railway project `nonai-backend`** (workspace `minh070607's Projects`, id `4f35d7e2-6ed1-44e4-b4cb-0eb8e9749ff9`), environment `production`, three services:
+- `nonai-backend` — FastAPI, built from `backend/Dockerfile`, deployed via `railway up ./backend`.
+  Public domain on target port 8000; `PORT=8000` pinned (the Dockerfile now binds `${PORT:-8000}`).
+- `Postgres` — Railway PostgreSQL plugin. `POSTGRES_DSN=${{Postgres.DATABASE_URL}}` (internal).
+- `qdrant` — `qdrant/qdrant:latest`. `QDRANT_URL=http://qdrant.railway.internal:6333` (internal).
+
+**Schema:** no external `psql` needed — `app/db/postgres.py::ensure_runtime_schema()` now creates the
+base tables too (see the Phase 6 code commit), so the app self-bootstraps its full schema + seeds the
+hotlines/embassies on first boot against a fresh managed Postgres.
+
+**Seeds (Qdrant `scam_patterns` + Postgres `price_references`):** baked into the deploy via
+`backend/railway.json` `startCommand` — they run in the background on container start (idempotent,
+always exit 0, read the committed `seed_data/` + `output/crawled_restaurants_cache.json`), so they
+never block the `/health` check. Re-run manually with
+`railway ssh --service nonai-backend "python -m app.agent.seed_scam_patterns"` (needs a registered SSH key).
+
+**Backend env vars set on Railway** (values held privately — set from `backend/.env`, never committed):
+`AI_MODE=live`, `AI_BASE_URL=https://mkp-api.fptcloud.com`, both split + legacy key names
+(`AI_CHAT_API_KEY`+`GLM_API_KEY`, `AI_VISION_API_KEY`+`QWEN_VL_API_KEY`,
+`AI_EMBED_API_KEY`+`VN_EMBEDDING_API_KEY`, `AI_STT_API_KEY`+`WHISPER_V3_API_KEY`), `GEMINI_API_KEY`,
+`TAVILY_API_KEY`, `EMBEDDING_DIM=1024`, `MOCK_GOOGLE_PLACES=true`, `POSTGRES_DSN`, `QDRANT_URL`, `PORT=8000`.
+
+**Vercel `nonai`** (`prj_nHImfGpuP8LHiiAVmvlMXKS9mH9I` / `team_cdmOkWuR97A5rxthTxrn8VaE`, scope
+`mdsat-s-projects`): `BACKEND_URL` set for Production + Preview = the Railway URL above; `SERPAPI_KEY`
+already present. Deployed with `cd frontend && vercel --prod --yes --scope mdsat-s-projects`.
+
+**Redeploy cheat-sheet**
+- Backend: `cd backend && railway up --service nonai-backend` (or `railway redeploy --service nonai-backend`).
+- Frontend: `cd frontend && vercel --prod --yes --scope mdsat-s-projects`.
+- Change a backend key: `railway variables --service nonai-backend --set 'NAME=value'` then redeploy.
 
 ## Change log
 - 2026-07-18: Repo cloned; frontend moved into `frontend/`; plan + progress docs written; first push.
@@ -117,4 +129,5 @@ clear these). Exact remediation:
 - 2026-07-18: Phase 3 — wired **price-check** (receipt photo → `/api/chat` receipt mode; backend `reply` + `normalized_prices_vnd`, mock gauge/`PriceTable` fallback); `tsc --noEmit` clean. Remaining: profile country picker.
 - 2026-07-18: Phase 3 — wired **profile country picker** (`BottomSheet` over `COUNTRIES` → `setCountry`, mirrors `LanguageSwitcher`); **Phase 3 feature wiring complete**; `tsc --noEmit` clean. Next: Phase 4 docs.
 - 2026-07-18: Phase 4 — docs: top-level `README.md` now documents the monorepo + frontend↔backend integration + run steps (`.env.example` already complete from Phase 2). `tsc --noEmit` clean; local `npm run build` blocked by the `node_modules` junction under Turbopack (builds clean on Vercel). Deploy (Phases 5–6) deferred to the account owner.
-- 2026-07-18: Phase 5 — **verified** all Phase 0–4 commits are on `origin/main` (remote `main` == local `37bbddf`; the local tracking ref was stale, showing a false "ahead 9"). Phase 5 ticked. **Phase 6 (deploy) confirmed BLOCKED on owner-only prerequisites** — interactive `railway login` (non-interactive session can't drive browser OAuth) + the private FPT/Gemini/Tavily keys (no `backend/.env` on this machine); `railway`/`psql` also not installed. Frontend/Vercel is ready except `BACKEND_URL` (no Railway URL yet). Full remediation added to Blockers. Nothing deployed.
+- 2026-07-18: Phase 5 — **verified** all Phase 0–4 commits are on `origin/main` (remote `main` == local `37bbddf`; the local tracking ref was stale, showing a false "ahead 9"). Phase 5 ticked.
+- 2026-07-18: **Phase 6 — DEPLOYED.** Owner logged into Railway (interactive) and supplied the FPT/Gemini/Tavily keys → `backend/.env` (gitignored). Backend deploy fixes committed: `ensure_runtime_schema()` self-bootstraps the base tables (no external `psql`), Dockerfile binds `${PORT:-8000}`, and `backend/railway.json` runs the two seeds in the background on startup. Provisioned Railway `nonai-backend` + `Postgres` + `qdrant`, set all env vars, deployed → **https://nonai-backend-production.up.railway.app** (`/health` ok). Set `BACKEND_URL` on Vercel (Prod+Preview) and deployed the integration frontend → **https://nonai-three.vercel.app**. Verified live end-to-end: `/api/session`, `/api/chat` (real GLM), `/api/sos` (hotlines + correct embassy) all `source:"backend"`; `/api/nearby` `source:"serpapi"`. Mock fallback intact when `BACKEND_URL` is unset.
