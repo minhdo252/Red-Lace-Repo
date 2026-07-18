@@ -52,6 +52,27 @@ new machine and don't have them, ask the account owner.
    `BACKEND_URL`). Set `BACKEND_URL` in `frontend/.env.local` to point at the backend.
 5. Commit + push after each phase; update this file's checkboxes + "Last updated".
 
+## Environment notes (this Windows machine — save the next session time)
+- Local clone lives at `C:\Users\ADM\Documents\RedLace\Red-Lace-Repo` (ASCII path on purpose).
+  Working tree is clean — everything is committed + pushed to `main`.
+- `git` is installed but **not on PATH**: prepend `C:\Program Files\Git\cmd`. The **Bash tool does
+  not work** here (git-bash is a partial install) — use **PowerShell**.
+- The repo is **private**; git's HTTPS transport hangs on the `gh` credential helper. Push/pull with
+  the helper disabled and the token in the URL:
+  `git -c credential.helper= push "https://x-access-token:$(gh auth token)@github.com/minhdo252/Red-Lace-Repo.git" HEAD:main`
+  (`gh` is already logged in as `minh070607`).
+- Frontend `node_modules` is a **junction** to the old `nonai` install, so `cd frontend; npx tsc --noEmit`
+  works without `npm install`. If it's missing, run `npm install` in `frontend/`.
+- **Docker is not installed** → the backend can't run locally; validate backend changes on Railway.
+
+## Ready-to-paste prompt for the continuing (2nd) account
+> Read `C:\Users\ADM\Documents\RedLace\Red-Lace-Repo\IMPLEMENTATION_PLAN.md` and `PROGRESS.md`.
+> Continue Phase 3: wire **price-check** and add the **Profile country picker** (recipes are in
+> PROGRESS.md), keeping every mock as the fallback. Typecheck with `cd frontend; npx tsc --noEmit`,
+> then commit + push each to `main` and tick the boxes in PROGRESS.md. Then do Phase 4 (write
+> `frontend/README` notes / top-level README). **Do NOT deploy** — the owner deploys from another
+> account. Use PowerShell, and the git push command in PROGRESS.md's environment notes.
+
 ## Blockers / needs the account owner
 - **Railway login** is interactive → the owner runs `railway login` before Phase 6 (backend deploy).
 - **Vercel**: `.vercel` link is gitignored; re-link with the project IDs in the plan, or the owner
