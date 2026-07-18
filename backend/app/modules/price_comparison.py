@@ -32,17 +32,22 @@ Read-only: only queries Qdrant and Postgres, never writes.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
 import unicodedata
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from qdrant_client.models import FieldCondition, Filter, MatchValue
 
 from app.ai.vn_embedding import embed_query_texts
 from app.db.postgres import get_pool
 from app.db.qdrant import get_client
+from app.modules.price_web_fallback import web_fallback_price
 
-MATCH_THRESHOLD = 0.6    # a hit must clear this to count as a comparable neighbor
+MATCH_THRESHOLD = 0.75   # a hit must clear this to count as a comparable neighbor
 MARKUP_THRESHOLD = 0.30  # observed price this fraction above the reference -> flag as overpriced
 NEIGHBOR_LIMIT = 10      # kNN candidates pulled per query (widened; head-phrase gate will trim)
 COMPARE_K = 3            # aggregate the nearest COMPARE_K comparable neighbors' price_vnd
@@ -148,21 +153,29 @@ async def compare_price(
     """Compare `observed_price` against the similarity-weighted mean price_vnd
     of the nearest comparable dishes in Postgres — see module docstring for
     the gating and aggregation logic."""
-    vector = embed_query_texts([item])[0]
-    qclient = get_client()
-    hits = (
-        await qclient.query_points(
-            collection_name="item_names",
-            query=vector,
-            query_filter=Filter(
-                must=[
-                    FieldCondition(key="region", match=MatchValue(value=region)),
-                    FieldCondition(key="category", match=MatchValue(value=category)),
-                ]
-            ),
-            limit=NEIGHBOR_LIMIT,
-        )
-    ).points
+    # Offload the blocking HTTP request to FPT Cloud embedding API to a background thread
+    # so we don't stall the async event loop if the API hangs.
+    try:
+        vector = (await asyncio.to_thread(embed_query_texts, [item]))[0]
+        qclient = get_client()
+        hits = (
+            await qclient.query_points(
+                collection_name="item_names",
+                query=vector,
+                query_filter=Filter(
+                    must=[
+                        FieldCondition(key="region", match=MatchValue(value=region)),
+                        FieldCondition(key="category", match=MatchValue(value=category)),
+                    ]
+                ),
+                limit=NEIGHBOR_LIMIT,
+            )
+        ).points
+    except Exception as e:
+        # If the embedding times out or Qdrant fails, we can't do local kNN.
+        # Just set hits to empty, which naturally falls through to the websearch fallback.
+        logger.warning("Embedding/Qdrant failed for %r, forcing web fallback. Error: %s", item, e)
+        hits = []
 
     top_score = hits[0].score if hits else 0.0
 
@@ -202,9 +215,24 @@ async def compare_price(
             min(neighbor_prices),
             max(neighbor_prices),
         )
+        reference_source = "local"
     else:
         reference_price = None
         reference_range = None
+        reference_source = "none"
+
+    # Web-search fallback: no confident local comparable -> derive a reference
+    # price from a live web search. Returns to the caller immediately; the
+    # write-back into Postgres/Qdrant happens on a deferred task (so the next
+    # lookup of this item is a local hit). See price_web_fallback.py.
+    source_url: str | None = None
+    if reference_price is None:
+        fallback = await web_fallback_price(item, region, category)
+        if fallback is not None:
+            reference_price = fallback["reference_price"]
+            reference_range = None
+            reference_source = "websearch"
+            source_url = fallback.get("source_url")
 
     result: dict[str, Any] = {
         "item": item,
@@ -213,10 +241,14 @@ async def compare_price(
         "query_head_phrase": query_head,
         "top_similarity": round(top_score, 3),
         "matched": reference_price is not None,
+        # where the reference came from: "local" | "websearch" | "none"
+        "reference_source": reference_source,
+        "source_url": source_url,
         "neighbors_used": len(gated),
         "matched_item_names": neighbor_names,
         "matched_item_similarities": [round(s, 3) for s in neighbor_sims],
         # similarity-weighted mean of the gated neighbors' Postgres prices
+        # (or the web-derived reference when reference_source == "websearch")
         "reference_price": round(reference_price) if reference_price is not None else None,
         "reference_price_range": (
             [round(reference_range[0]), round(reference_range[1])]
@@ -234,14 +266,18 @@ async def compare_price(
             diff_pct = diff / reference_price * 100
             result["price_diff_vnd"] = round(diff)
             result["price_diff_pct"] = round(diff_pct, 1)
+            basis = (
+                f"tìm kiếm web giá {reference_price:,.0f} VND"
+                if reference_source == "websearch"
+                else f"trung bình có trọng số {len(gated)} món gần nhất giá {reference_price:,.0f} VND"
+            )
             result["flag"] = (
-                f"cao hơn giá tham chiếu {diff_pct:.0f}% — trung bình có trọng số "
-                f"{len(gated)} món gần nhất giá {reference_price:,.0f} VND"
+                f"cao hơn giá tham chiếu {diff_pct:.0f}% — {basis}"
                 if diff_pct > MARKUP_THRESHOLD * 100
                 else None
             )
         else:
-            # no comparable neighbor -> can't judge whether this price is fair
+            # no comparable neighbor and no web price -> can't judge fairness
             result["flag"] = None
 
     return result

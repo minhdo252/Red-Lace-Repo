@@ -16,3 +16,4 @@ lxml==5.2.2
 playwright==1.44.0
 tenacity>=8.5.0
 pydub>=0.25.1
+google-genai>=1.0.0

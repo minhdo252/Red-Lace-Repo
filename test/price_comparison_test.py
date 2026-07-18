@@ -30,6 +30,7 @@ Run locally (from backend/, so `app` resolves as a package):
 """
 
 import asyncio
+import time
 
 from app.db.postgres import close_pool, init_pool
 from app.modules.price_comparison import compare_price
@@ -54,15 +55,60 @@ SCENARIOS: list[tuple[str, float | None]] = [
     ("sushi cá hồi", 200000),    # expect: not matched
     ("pizza hải sản", None),     # expect: not matched
     ("máy bay phản lực", None),  # nonsense -> not matched (or no hits)
+
+    # --- EDGE: rare/niche dishes unlikely in seeded DB -> should trigger Gemini fallback ---
+    ("bánh cuốn Phủ Lý", None),          # fresh name
+    ("bún đậu mắm tôm thập cẩm", 250000), # fresh name
+    ("phở cuốn Ngũ Xã", None),            # fresh name
+    ("bánh tôm Hồ Tây", None),            # fresh name
+
+    # --- EDGE: misspellings / missing diacritics ---
+    ("xoi xeo", None),                      # fresh name
+    ("banh mi pate", 60000),                # fresh name
+
+    # --- EDGE: very cheap items (sanity floor test) ---
+    ("trà râu ngô", None),                  # fresh name, testing portion size rule
+    ("trà chanh", None),                    # fresh name
+
+    # --- EDGE: expensive items ---
+    ("tôm hùm hấp bia", 1500000),           # fresh name, testing exact match rule
+    ("cua hoàng đế hấp", None),             # fresh name, testing exact match rule
+
+    # --- EDGE: non-food / service items ---
+    ("vé xe buýt 2 tầng", 300000),          # fresh name
+    ("vé tham quan Hoàng Thành", 30000),    # fresh name, testing ticket rule
+
+    # --- EDGE: ambiguous / compound names ---
+    ("mì", None),                           # fresh name, generic
+    ("nước ép", None),                      # fresh name, generic
+    ("thập cẩm", None),                     # fresh name, modifier
+
+    # --- NEW EDGE: Trendy / Viral street foods ---
+    ("lạp xưởng nướng đá", None),           # trendy street food
+    ("bánh đồng xu phô mai", None),         # viral snack
+    ("trà sữa nướng", None),                # specific milk tea type
+    ("gà ủ muối hoa tiêu", 250000),         # whole chicken dish
+
+    # --- NEW EDGE: Regional dishes in Hanoi ---
+    ("hủ tiếu nam vang", None),             # southern dish sold in Hanoi
+    ("mì quảng ếch", None),                 # central dish sold in Hanoi
+
+    # --- NEW EDGE: Branded items / specific cuts ---
+    ("bia heineken chai", 25000),           # branded drink
+    ("nước ngọt coca cola", None),          # branded drink
+    ("lõi rùa bò", None),                   # specific premium beef cut
 ]
 
 
-def _print_result(result: dict) -> None:
-    print(f"\n=== {result['item']!r}  ({result['region']}/{result['category']}) ===")
+
+def _print_result(result: dict, elapsed_s: float) -> None:
+    print(f"\n=== {result['item']!r}  ({result['region']}/{result['category']}) === [{elapsed_s:.3f}s]")
     print(f"  matched          : {result['matched']}")
     print(f"  neighbors_used   : {result['neighbors_used']}")
     print(f"  matched_item_names: {result['matched_item_names']!r}")
     print(f"  top_similarity   : {result['top_similarity']}")
+    print(f"  reference_source : {result.get('reference_source', '—')}")
+    print(f"  elapsed          : {elapsed_s:.3f}s")
 
     if result["reference_price"] is not None:
         print(f"  reference_price  : {result['reference_price']:,} VND (mean of {result['neighbors_used']})")
@@ -81,18 +127,26 @@ async def main() -> None:
     await init_pool()
     try:
         results = []
+        timings = []
+        total_start = time.perf_counter()
+
         for item, observed_price in SCENARIOS:
+            t0 = time.perf_counter()
             result = await compare_price(
                 item,
                 region=REGION,
                 category=CATEGORY,
                 observed_price=observed_price,
             )
-            _print_result(result)
+            elapsed = time.perf_counter() - t0
+            _print_result(result, elapsed)
             results.append(result)
+            timings.append(elapsed)
+
+        total_elapsed = time.perf_counter() - total_start
 
         print("\n\n=== Summary (mean-of-top-K reference price per query) ===")
-        for result in results:
+        for result, elapsed in zip(results, timings):
             obs = f"{result['observed_price']:,} VND" if "observed_price" in result else "—"
             ref = (
                 f"{result['reference_price']:>8,} VND"
@@ -100,10 +154,13 @@ async def main() -> None:
                 else f"{'—':>12}"
             )
             status = "matched " if result["matched"] else "no-match"
+            src = result.get('reference_source', '—')
             print(
                 f"  {status}  sim={result['top_similarity']:<5} k={result['neighbors_used']} "
-                f"ref={ref}  obs={obs:>12}  {result['item']!r}"
+                f"ref={ref}  obs={obs:>12}  src={src:<10} "
+                f"t={elapsed:.3f}s  {result['item']!r}"
             )
+        print(f"\n  Total elapsed: {total_elapsed:.3f}s")
     finally:
         await close_pool()
 

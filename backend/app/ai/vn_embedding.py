@@ -90,8 +90,23 @@ def embed_query_texts(texts: list[str]) -> list[list[float]]:
     if not texts:
         return []
     api_key = _require_api_key()
-    client = OpenAI(api_key=api_key, base_url=BASE_URL)
+    client = OpenAI(api_key=api_key, base_url=BASE_URL, timeout=5.0)
     return _embed_batch(client, texts, input_type="query")
+
+
+def embed_passage_texts(texts: list[str]) -> list[list[float]]:
+    """Embed arbitrary strings as Qdrant *passage* (index-side) vectors
+    (input_type='passage') — the same side used by embed_price_references().
+    Use this when INDEXING a new item into item_names (e.g. the web-search
+    fallback persisting a newly discovered dish), so it lands on the same
+    side as the crawled rows. Mixing this up with the query side degrades
+    matching, since Vietnamese_Embedding does asymmetric retrieval.
+    """
+    if not texts:
+        return []
+    api_key = _require_api_key()
+    client = OpenAI(api_key=api_key, base_url=BASE_URL, timeout=5.0)
+    return _embed_batch(client, texts, input_type="passage")
 
 
 def embed_qwen_vl_ready_rows(ready_rows: list) -> list[list[float]]:
