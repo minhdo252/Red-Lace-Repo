@@ -13,9 +13,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Pre-install Chromium for the playwright-based crawler services (backend
-# itself never launches a browser, but shares this image with them).
-RUN playwright install chromium
+# Chromium for the playwright crawler services is installed at runtime by those
+# services when needed (FORCE_LIVE_CRAWL); the backend never launches a browser,
+# so it's skipped here to keep the image build fast and reliable on the platform.
+# RUN playwright install chromium
 
 COPY app ./app
 COPY start.sh ./start.sh
