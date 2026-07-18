@@ -24,6 +24,7 @@ from app.modules.language import canonical_language_code, is_supported_native_la
 from app.modules.memory import trigger_background_compression
 from app.modules.pii import redact_pii
 from app.modules.price_comparison import compare_price
+from app.modules.price_intent import PriceIntent, detect_price_intent
 from app.modules.scam_detection import match_scam_pattern
 from app.modules.threat_detection import detect_threat
 from app.modules.translation import resolve_translation_target, translate_text
@@ -35,12 +36,6 @@ SCAM_PREFILTER_THRESHOLD = 0.6
 DEFAULT_REGION = "Hanoi"
 SERVER_HISTORY_LIMIT = 12
 ALLOWED_SPEAKER_ROLES = {"tourist", "vendor", "unknown"}
-
-REGION_GLOSSARY: dict[str, list[str]] = {
-    "Hanoi": ["Pho Thin", "bun cha", "Hoan Kiem", "Old Quarter", "xich lo", "dong", "nghin", "trieu"],
-    "Sapa": ["Fansipan", "Ham Rong", "Cat Cat", "Ta Van", "bac ha", "dong", "nghin", "trieu"],
-    "Hoi An": ["cao lau", "banh mi", "Ancient Town", "An Bang", "Thu Bon", "dong", "nghin", "trieu"],
-}
 
 FALLBACK_SCAM_RULES: list[dict[str, Any]] = [
     {
@@ -95,17 +90,6 @@ def _redact_history(messages: list[dict[str, Any]]) -> list[dict[str, str]]:
             role = "user"
         safe_messages.append({"role": role, "content": redact_pii(message["content"])})
     return safe_messages
-
-
-def _travel_glossary_prompt(region: str, native_language: str, nationality: str) -> str:
-    terms = REGION_GLOSSARY.get(region, []) + REGION_GLOSSARY.get(DEFAULT_REGION, [])
-    unique_terms = ", ".join(dict.fromkeys(terms))
-    return (
-        "Transcribe the speech verbatim in the language actually spoken. Do not translate, "
-        "summarize, or answer it. Preserve menu item names, place names, prices, and currency "
-        f"units. Region={region}; tourist_language={native_language}; "
-        f"tourist_nationality={nationality}. Common local terms: {unique_terms}."
-    )
 
 
 def _speaker_role(raw_role: str | None) -> str:
@@ -496,6 +480,75 @@ async def _run_image_route(images: list[dict[str, Any]], region: str) -> dict[st
     }
 
 
+def _build_price_text_reply(analysis: dict[str, Any], intent: PriceIntent, region: str) -> str:
+    """Human-readable verdict for a typed price question — no LLM. Handles both the
+    'is this expensive?' case (a price was given) and the 'how much?' case (no price)."""
+    name = intent.item
+    reference = analysis.get("reference_price")
+
+    if intent.observed_price is None:  # "how much" question
+        if reference is None:
+            return f"I couldn't find a typical local price for {name}."
+        line = f"Typical price for {name} in {region} is about {reference:,.0f}₫"
+        rng = analysis.get("reference_price_range")
+        if rng:
+            line += f" (usually {rng[0]:,.0f}–{rng[1]:,.0f}₫)"
+        return line + "."
+
+    observed = intent.observed_price
+    if reference is None:
+        return f"{name}: {observed:,.0f}₫ — I don't have a local reference to compare that against."
+    if analysis.get("overpriced") and analysis.get("price_diff_pct") is not None:
+        return (
+            f"{name}: {observed:,.0f}₫ looks high — the typical local price is about "
+            f"{reference:,.0f}₫ (~{analysis['price_diff_pct']:.0f}% more). ⚠️"
+        )
+    return f"{name}: {observed:,.0f}₫ looks about fair — the typical local price is ~{reference:,.0f}₫. ✅"
+
+
+async def _run_price_text_route(intent: PriceIntent, region: str) -> dict[str, Any] | None:
+    """Text price-check route — Module 2.1 (compare_price) directly, no Qwen-VL OCR
+    and no chatbot LLM. Returns response fields, or None to fall through to the
+    orchestrator (a 'how much' question whose item has no local/web reference — let
+    the general chatbot answer instead of a bad 'no price')."""
+    try:
+        comparison = await compare_price(
+            item=intent.item, region=region, category="food", observed_price=intent.observed_price
+        )
+    except Exception:  # noqa: BLE001 - never fabricate; fall through to the orchestrator
+        return None
+
+    # "How much" question that found no comparable price -> let the orchestrator try.
+    if intent.observed_price is None and not comparison.get("matched"):
+        return None
+
+    analysis = {
+        "item": intent.item,
+        "observed_price": intent.observed_price,
+        "reference_price": comparison.get("reference_price"),
+        "reference_price_range": comparison.get("reference_price_range"),
+        "overpriced": bool(comparison.get("flag")),
+        "price_diff_pct": comparison.get("price_diff_pct"),
+        "flag": comparison.get("flag"),
+    }
+    args = {
+        "item": intent.item,
+        "region": region,
+        "category": "food",
+        "observed_price": intent.observed_price,
+    }
+    return {
+        "reply": _build_price_text_reply(analysis, intent, region),
+        "tools_invoked": [{"tool": "compare_price", "arguments": args, "result": comparison}],
+        "normalized_prices_vnd": [intent.observed_price] if intent.observed_price is not None else [],
+        "price_analysis": {
+            "region": region,
+            "items": [analysis],
+            "overall_overpriced": bool(comparison.get("flag")),
+        },
+    }
+
+
 async def _persist_chat_turn(
     pool: Any,
     session_id: uuid.UUID,
@@ -601,12 +654,11 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks) -> ChatR
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         language_hint = _audio_language_hint(request, speaker_role, native_language)
         try:
+            # No initial_prompt: the FPT Whisper endpoint 500s on a term-list prompt
+            # and even truncates the transcript when given one — it reads this audio
+            # cleanly with no priming.
             raw_text = await asyncio.wait_for(
-                ai_client.transcribe(
-                    wav_bytes,
-                    language_hint=language_hint,
-                    initial_prompt=_travel_glossary_prompt(region, native_language, nationality),
-                ),
+                ai_client.transcribe(wav_bytes, language_hint=language_hint),
                 timeout=settings.stt_deadline_seconds,
             )
         except TimeoutError as exc:
@@ -690,33 +742,44 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks) -> ChatR
             degraded_components.append("scam_prefilter")
         if getattr(threat_result, "degraded", False):
             degraded_components.append("threat_assessment")
-    else:  # text — unchanged full pipeline
-        turn_result, translation_details, scam_result, threat_result = await asyncio.gather(
-            _run_orchestrator_for_chat(
-                clean_text,
-                history=orchestrator_history,
-                images=[image.model_dump() for image in request.images],
-                region=region,
-            ),
-            _translate_for_chat(clean_text, nationality, native_language, context_text, speaker_role),
-            _scan_scam_prefilter(clean_text, region=region),
-            detect_threat(clean_text, session_id=request.session_id, conversation_context=context_text + [clean_text]),
-        )
-        scam_flags, scam_status = scam_result
-        translation_text = translation_details.get("translated_text")
-        reply = turn_result.get("reply") or translation_text or ""
-        tools_invoked = turn_result.get("tools_invoked", [])
-        critic = turn_result.get("critic")
-        normalized_prices = translation_details.get("normalized_prices_vnd") or []
-        threat_payload = threat_result.to_dict()
-        if turn_result.get("degraded"):
-            degraded_components.append("orchestrator")
-        if translation_details.get("degraded"):
-            degraded_components.append("translation")
-        if not scam_status.get("qdrant_ok"):
-            degraded_components.append("scam_prefilter")
-        if getattr(threat_result, "degraded", False):
-            degraded_components.append("threat_assessment")
+    else:  # text
+        # Deterministic price-check intent ("bún đậu 200k", "cơm rang 100k có đắt
+        # không", "how much is bún đậu?") -> Module 2.1 directly: no Qwen-VL OCR and
+        # no chatbot LLM. None / a "how much" miss falls through to the orchestrator.
+        price_intent = detect_price_intent(clean_text)
+        price_result = await _run_price_text_route(price_intent, region) if price_intent else None
+        if price_result is not None:
+            reply = price_result["reply"]
+            tools_invoked = price_result["tools_invoked"]
+            normalized_prices = price_result["normalized_prices_vnd"]
+            price_analysis = price_result["price_analysis"]
+        else:  # normal chatbot — full orchestrator pipeline
+            turn_result, translation_details, scam_result, threat_result = await asyncio.gather(
+                _run_orchestrator_for_chat(
+                    clean_text,
+                    history=orchestrator_history,
+                    images=[image.model_dump() for image in request.images],
+                    region=region,
+                ),
+                _translate_for_chat(clean_text, nationality, native_language, context_text, speaker_role),
+                _scan_scam_prefilter(clean_text, region=region),
+                detect_threat(clean_text, session_id=request.session_id, conversation_context=context_text + [clean_text]),
+            )
+            scam_flags, scam_status = scam_result
+            translation_text = translation_details.get("translated_text")
+            reply = turn_result.get("reply") or translation_text or ""
+            tools_invoked = turn_result.get("tools_invoked", [])
+            critic = turn_result.get("critic")
+            normalized_prices = translation_details.get("normalized_prices_vnd") or []
+            threat_payload = threat_result.to_dict()
+            if turn_result.get("degraded"):
+                degraded_components.append("orchestrator")
+            if translation_details.get("degraded"):
+                degraded_components.append("translation")
+            if not scam_status.get("qdrant_ok"):
+                degraded_components.append("scam_prefilter")
+            if getattr(threat_result, "degraded", False):
+                degraded_components.append("threat_assessment")
 
     response = ChatResponse(
         reply=reply,

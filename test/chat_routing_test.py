@@ -29,6 +29,7 @@ import base64
 import json
 import os
 import sys
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -45,8 +46,11 @@ def _post(path: str, payload: dict) -> dict:
     req = urllib.request.Request(
         f"{BASE_URL}{path}", data=data, headers={"content-type": "application/json"}
     )
-    with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310 - local trusted URL
-        return json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310 - local trusted URL
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:  # don't let one route's error abort the run
+        return {"_http_status": exc.code, "_http_detail": exc.read().decode("utf-8", "replace")}
 
 
 def check(name: str, condition: bool, detail: str = "") -> None:
@@ -73,6 +77,20 @@ def test_text_route(sid: str) -> None:
     )
     check("input_route == 'text'", resp.get("input_route") == "text", str(resp.get("input_route")))
     check("reply is a non-empty string", isinstance(resp.get("reply"), str) and bool(resp["reply"]))
+    # A general question must NOT trip the price-check intent.
+    check("general question: no price_analysis (orchestrator path)", resp.get("price_analysis") is None)
+
+
+def test_price_intent_route(sid: str) -> None:
+    print("typed price question -> Module 2.1 (no Qwen-VL, no orchestrator LLM)")
+    resp = _post(
+        "/chat/text",
+        {"session_id": sid, "text": "bún đậu 200k có đắt không", "speaker_role": "tourist", "region": "Hanoi"},
+    )
+    check("price intent: input_route == 'text'", resp.get("input_route") == "text", str(resp.get("input_route")))
+    check("price intent: price_analysis present", resp.get("price_analysis") is not None)
+    tools = {t.get("tool") for t in resp.get("tools_invoked") or []}
+    check("price intent: only compare_price ran (no orchestrator)", tools == {"compare_price"}, str(tools))
 
 
 def test_image_route(sid: str) -> None:
@@ -117,6 +135,10 @@ def test_voice_route(sid: str) -> None:
             "speaker_role": "tourist",
         },
     )
+    if resp.get("_http_status") == 503:
+        print(f"  [SKIP] voice route — STT unavailable on this backend (503): "
+              f"{resp.get('_http_detail', '')[:90]}")
+        return
     check("input_route == 'voice'", resp.get("input_route") == "voice", str(resp.get("input_route")))
     # Voice drops ONLY the orchestrator -> no tool calls come back.
     check("tools_invoked is empty (no orchestrator)", (resp.get("tools_invoked") or []) == [])
@@ -134,6 +156,7 @@ def main() -> int:
         return 2
     print(f"session_id = {sid}\n")
     test_text_route(sid)
+    test_price_intent_route(sid)
     test_image_route(sid)
     test_voice_route(sid)
     print()

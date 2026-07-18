@@ -342,7 +342,17 @@ class AIClient:
         if initial_prompt:
             kwargs["prompt"] = initial_prompt
 
-        response = await self._get_stt_client().audio.transcriptions.create(**kwargs)
+        client = self._get_stt_client()
+        try:
+            response = await client.audio.transcriptions.create(**kwargs)
+        except Exception:
+            # Some Whisper-compatible endpoints reject a `prompt` (the FPT one 500s
+            # on a term list). Never let a priming prompt take down transcription —
+            # retry once without it before giving up.
+            if "prompt" not in kwargs:
+                raise
+            kwargs.pop("prompt")
+            response = await client.audio.transcriptions.create(**kwargs)
         text = getattr(response, "text", "") or ""
         return "" if _is_whisper_hallucination(text) else text
 

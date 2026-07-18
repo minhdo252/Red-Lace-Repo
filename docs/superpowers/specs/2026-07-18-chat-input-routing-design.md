@@ -79,9 +79,35 @@ Note on precedence: the frontend never mixes image + audio, but the proxy's audi
 5. The Home UI already swaps the user's bubble to the transcript (`updateUserFromTranscript`), so: user bubble = what they said, AI reply = the translation.
 6. Degradation reuses the existing `_translate_for_chat` fallback envelope.
 
-## Text route (unchanged)
+## Text route
 
-Full orchestrator + translate + scam + threat, `reply = orchestrator reply or translation`. `check_ghost_tour` (tour-check URLs) continues to work here. `input_route = "text"`.
+`input_route = "text"`. A **deterministic price-check intent pre-check** runs first
+(`app/modules/price_intent.py::detect_price_intent`, no model call); if it doesn't
+fire, the turn goes through the unchanged full pipeline: orchestrator + translate +
+scam + threat, `reply = orchestrator reply or translation`. `check_ghost_tour`
+(tour-check URLs) continues to work on the orchestrator path.
+
+### Text price-check intent → Module 2.1 (no Qwen-VL, no chatbot LLM)
+
+`detect_price_intent(text)` recognizes a typed price question about a menu item and
+routes it straight to Module 2.1, reusing the image route's `compare_price` +
+verdict — the item/price come from the text, so the OCR step is skipped entirely.
+
+- **Item + stated price** ("bún đậu 200k", "cơm rang 100k có đắt không"): fire when a
+  price is present, a non-empty item remains after stripping the price token + cues,
+  and (a price cue is present **or** the item phrase is ≤ 5 words). → verdict vs the
+  local/web reference ("looks fair" / "~X% over" / "no local reference").
+- **No-price "how much"** ("how much is bún đậu?", "giá bún đậu bao nhiêu?"): fire on a
+  price cue + short item, no price. → the fair reference price. If `compare_price`
+  finds **no** reference, fall through to the orchestrator (don't answer with a bad
+  "no price").
+- Price extraction reuses `translation.py::extract_normalized_prices_vnd` (handles
+  `k`/`nghìn`/`triệu`/spelled amounts; ignores phones/OTP). The extracted item keeps
+  its Vietnamese diacritics for embedding accuracy.
+- On fire: `reply` = verdict, `price_analysis` set, `tools_invoked = [compare_price]`,
+  `input_route = "text"`; orchestrator + scam + threat skipped (the overpriced flag is
+  the "is it expensive?" answer, same as the image route). Detection is deterministic
+  and language-tolerant; a general question ("Where is Hoan Kiem Lake?") does not fire.
 
 ## Response schema additions (`app/schemas/chat.py::ChatResponse`)
 

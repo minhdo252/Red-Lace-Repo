@@ -176,10 +176,15 @@ function topScam(flags?: ScamFlag[]): ScamFlag | null {
   return flags.reduce((a, b) => ((b.best_score ?? 0) > (a.best_score ?? 0) ? b : a));
 }
 
-/** Backend threat block -> a normalized level string. */
+/** Backend threat block -> a normalized level string. The backend emits
+ * `final_level` (see app/modules/threat_detection.py); level/risk_level are kept
+ * as fallbacks. */
 export function threatLevel(env: ChatEnvelope): string {
-  const t = env.threat as { level?: string; risk_level?: string } | null | undefined;
-  return String(t?.level ?? t?.risk_level ?? "NONE").toUpperCase();
+  const t = env.threat as
+    | { final_level?: string; level?: string; risk_level?: string }
+    | null
+    | undefined;
+  return String(t?.final_level ?? t?.level ?? t?.risk_level ?? "NONE").toUpperCase();
 }
 
 export function isCriticalThreat(env: ChatEnvelope): boolean {
