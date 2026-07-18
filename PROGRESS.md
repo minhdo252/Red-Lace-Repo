@@ -4,7 +4,7 @@
 > **where-are-we-now** log. It is updated and pushed at every checkpoint so any machine/account
 > can pull and continue exactly where the last one stopped.
 
-**Last updated:** 2026-07-18 · **Overall:** Phase 0 complete; starting Phase 1.
+**Last updated:** 2026-07-18 · **Overall:** Phases 0–1 complete; starting Phase 2 (frontend integration layer).
 
 ## Status by phase
 - [x] **Phase 0 — Monorepo setup**
@@ -13,8 +13,9 @@
         `node_modules`, `.next`; `.env.local` + `.vercel` are present locally but gitignored).
   - [x] Wrote `IMPLEMENTATION_PLAN.md` + this `PROGRESS.md`.
   - [ ] First push to GitHub (this checkpoint).
-- [ ] **Phase 1 — Backend unblock**: create `backend/app/ai/glm_chat.py` (live chat + critic
-      currently crash without it — see plan finding #1).
+- [x] **Phase 1 — Backend unblock**: created `backend/app/ai/glm_chat.py` (GLM-5.2 OpenAI-compatible
+      chat + tool-calling; `glm_chat()` + `has_api_key()`). Matches the `client.py` / `critic.py`
+      call sites; `py_compile` clean. Full runtime import validates on Railway (deps not installed locally).
 - [ ] **Phase 2 — Frontend integration layer**: `frontend/src/lib/api.ts`, proxy routes
       (`/api/session`, `/api/chat`, `/api/sos`), `sessionId` in `i18n/index.tsx`,
       `useGeolocation`, nationality derive + Profile picker, response mappers.
@@ -47,3 +48,4 @@ new machine and don't have them, ask the account owner.
 
 ## Change log
 - 2026-07-18: Repo cloned; frontend moved into `frontend/`; plan + progress docs written; first push.
+- 2026-07-18: Phase 1 — added `backend/app/ai/glm_chat.py` (unblocks live chat + critic).
