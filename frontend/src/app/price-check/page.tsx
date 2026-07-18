@@ -19,39 +19,77 @@ import { Chip } from "@/components/ui/Chip";
 import { Gauge } from "@/components/ui/Gauge";
 import { AnalysisLoader } from "@/components/ui/AnalysisLoader";
 import { PriceTable } from "@/components/price/PriceTable";
-import { useT } from "@/i18n";
+import { useApp, useT } from "@/i18n";
 import { usePhase, useFakeProgress } from "@/lib/hooks";
-import { formatVnd } from "@/lib/utils";
+import { formatVnd, delay } from "@/lib/utils";
 import { receiptAnalysis, analysisSteps } from "@/mocks/price-check";
+import { chatRequest, fileToBase64, localeToNativeLanguage } from "@/lib/api";
 
 type P = "capture" | "analyzing" | "result";
 
+/** A live backend fair-price result (AI reply + normalized prices); null = mock fallback. */
+type LiveResult = { reply: string; prices: number[]; region: string | null };
+
 export default function PriceCheckPage() {
   const t = useT("price");
+  const { locale, country, ensureSession } = useApp();
   const { phase, setPhase } = usePhase<P>("capture");
   const [preview, setPreview] = useState<string | null>(null);
+  const [live, setLive] = useState<LiveResult | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // Purely-visual analysis animation; the real transition to "result" is driven by
+  // onFile awaiting the backend turn (mirrors tour-check).
   const { index, percent } = useFakeProgress(
     analysisSteps.map((label) => ({ label })),
     3200,
     phase === "analyzing",
-    () => setPhase("result"),
   );
 
-  const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Photograph a receipt/menu -> POST /api/chat (images, receipt mode). On a live
+  // backend, show its reply + normalized prices; otherwise fall back to the mock
+  // gauge + PriceTable. (Same AI-native path as Home's photo scan.)
+  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
-    if (f) setPreview(URL.createObjectURL(f));
+    if (!f) return;
+    setPreview(URL.createObjectURL(f));
+    e.target.value = "";
+    // Read the file before showing the loader so a FileReader failure can't strand
+    // the user on the analysis spinner (mirrors Home's onPickPhoto ordering).
+    const base64 = await fileToBase64(f);
     setPhase("analyzing");
+    const sid = await ensureSession();
+    const [env] = await Promise.all([
+      chatRequest({
+        session_id: sid,
+        native_language: localeToNativeLanguage(locale),
+        nationality: country.code,
+        speaker_role: "tourist",
+        images: [{ image_base64: base64, mode: "receipt" }],
+      }),
+      delay(1200),
+    ]);
+    setLive(
+      env.source === "backend"
+        ? {
+            reply: env.reply ?? "",
+            prices: env.normalized_prices_vnd ?? [],
+            region: env.resolved_region ?? null,
+          }
+        : null,
+    );
+    setPhase("result");
   };
 
   const reset = () => {
     setPreview(null);
+    setLive(null);
     setPhase("capture");
   };
 
   const a = receiptAnalysis;
   const verdictLabel = a.verdict === "fair" ? t.fair : a.verdict === "mid" ? t.mid : t.high;
+  const areaLabel = live ? live.region : a.area;
 
   return (
     <Screen>
@@ -136,9 +174,13 @@ export default function PriceCheckPage() {
             className="space-y-5 px-5 pb-8 pt-2"
           >
             <div className="flex items-center justify-between">
-              <Chip tone="moss">
-                <MapPin size={13} /> {a.area}
-              </Chip>
+              {areaLabel ? (
+                <Chip tone="moss">
+                  <MapPin size={13} /> {areaLabel}
+                </Chip>
+              ) : (
+                <span />
+              )}
               {preview ? (
                 <Image
                   src={preview}
@@ -154,46 +196,75 @@ export default function PriceCheckPage() {
               )}
             </div>
 
-            {/* verdict gauge */}
-            <div className="rounded-[var(--radius-lg)] bg-surface p-5 shadow-[var(--shadow-soft)]">
-              <Gauge
-                verdict={a.verdict}
-                label={verdictLabel}
-                sublabel={a.overpayPct > 0 ? `${a.overpayPct}% over usual` : "within range"}
-              />
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                <div className="rounded-2xl bg-high/[0.06] p-3.5 text-center">
-                  <p className="text-xs font-medium text-ink-mute">{t.youPaid}</p>
-                  <p className="mt-0.5 font-display text-xl font-extrabold text-high">
-                    {formatVnd(a.totalPaid)}
+            {live ? (
+              /* ---- live backend result: AI reply + normalized prices ---- */
+              <div className="rounded-[var(--radius-lg)] bg-surface p-5 shadow-[var(--shadow-soft)]">
+                <div className="flex items-start gap-3">
+                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-teal/20 text-teal-deep">
+                    <MessageSquareQuote size={18} />
+                  </span>
+                  <p className="whitespace-pre-line text-[0.9rem] leading-snug text-ink-soft text-pretty">
+                    {live.reply || t.disclaimer}
                   </p>
                 </div>
-                <div className="rounded-2xl bg-moss-soft p-3.5 text-center">
-                  <p className="text-xs font-medium text-ink-mute">{t.reference}</p>
-                  <p className="mt-0.5 font-display text-[0.95rem] font-extrabold text-moss-strong">
-                    {formatVnd(a.refLow)}–{formatVnd(a.refHigh)}
-                  </p>
-                </div>
+                {live.prices.length > 0 && (
+                  <div className="mt-4 border-t border-line pt-4">
+                    <p className="mb-2 text-xs font-semibold text-ink-mute">Prices found</p>
+                    <div className="flex flex-wrap gap-2">
+                      {live.prices.map((p, i) => (
+                        <span
+                          key={i}
+                          className="rounded-full bg-moss-soft px-3 py-1.5 text-sm font-extrabold text-moss-strong"
+                        >
+                          {formatVnd(p)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
+            ) : (
+              /* ---- mock fallback: verdict gauge + per-item table + advice ---- */
+              <>
+                <div className="rounded-[var(--radius-lg)] bg-surface p-5 shadow-[var(--shadow-soft)]">
+                  <Gauge
+                    verdict={a.verdict}
+                    label={verdictLabel}
+                    sublabel={a.overpayPct > 0 ? `${a.overpayPct}% over usual` : "within range"}
+                  />
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    <div className="rounded-2xl bg-high/[0.06] p-3.5 text-center">
+                      <p className="text-xs font-medium text-ink-mute">{t.youPaid}</p>
+                      <p className="mt-0.5 font-display text-xl font-extrabold text-high">
+                        {formatVnd(a.totalPaid)}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl bg-moss-soft p-3.5 text-center">
+                      <p className="text-xs font-medium text-ink-mute">{t.reference}</p>
+                      <p className="mt-0.5 font-display text-[0.95rem] font-extrabold text-moss-strong">
+                        {formatVnd(a.refLow)}–{formatVnd(a.refHigh)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
 
-            {/* per item */}
-            <div>
-              <p className="mb-2 px-1 font-display text-[1.05rem] font-bold text-ink">
-                {t.perItem}
-              </p>
-              <PriceTable items={a.items} />
-            </div>
+                <div>
+                  <p className="mb-2 px-1 font-display text-[1.05rem] font-bold text-ink">
+                    {t.perItem}
+                  </p>
+                  <PriceTable items={a.items} />
+                </div>
 
-            {/* advice */}
-            <div className="flex items-start gap-3 rounded-[var(--radius-card)] bg-teal/8 p-4">
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-teal/20 text-teal-deep">
-                <MessageSquareQuote size={18} />
-              </span>
-              <p className="text-[0.85rem] leading-snug text-ink-soft text-pretty">
-                {t.disclaimer}
-              </p>
-            </div>
+                <div className="flex items-start gap-3 rounded-[var(--radius-card)] bg-teal/8 p-4">
+                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-teal/20 text-teal-deep">
+                    <MessageSquareQuote size={18} />
+                  </span>
+                  <p className="text-[0.85rem] leading-snug text-ink-soft text-pretty">
+                    {t.disclaimer}
+                  </p>
+                </div>
+              </>
+            )}
 
             <div className="flex gap-3">
               <Button variant="secondary" block onClick={reset}>
