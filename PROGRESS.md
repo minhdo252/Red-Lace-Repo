@@ -4,7 +4,7 @@
 > **where-are-we-now** log. It is updated and pushed at every checkpoint so any machine/account
 > can pull and continue exactly where the last one stopped.
 
-**Last updated:** 2026-07-18 · **Overall:** Phases 0–4 done — all Phase 3 feature wiring complete (Home, SOS, Translate, Tour-check, Price-check, Profile country picker) + Phase 4 docs written (top-level README now covers the monorepo + integration). `tsc --noEmit` clean; local Turbopack `npm run build` is blocked by the `node_modules` junction (builds clean on Vercel). Deploy (Phases 5–6) deferred to the account owner — do NOT deploy from here.
+**Last updated:** 2026-07-18 · **Overall:** Phases 0–5 done — Phase 3 feature wiring complete (Home, SOS, Translate, Tour-check, Price-check, Profile country picker) + Phase 4 docs + **Phase 5 pushed** (all Phase 0–4 commits verified on `origin/main`, remote `main` == local `37bbddf`). `tsc --noEmit` clean; local Turbopack `npm run build` is blocked by the `node_modules` junction (builds clean on Vercel). **Phase 6 (deploy) is BLOCKED on two owner-only prerequisites** (see Blockers): interactive `railway login` (this session can't drive a browser OAuth) **and** the private FPT/Gemini/Tavily API keys (not present on this machine — `backend/.env` is absent). No Railway URL exists yet, so `BACKEND_URL` can't be set on Vercel. Nothing is deployed.
 
 ## Status by phase
 - [x] **Phase 0 — Monorepo setup**
@@ -38,8 +38,13 @@
       clean. `npm run build` (Turbopack) can't complete on this machine — the
       `frontend/node_modules` junction "points out of the filesystem root"; the real
       production build runs clean on Vercel's fresh `npm install` at deploy.
-- [ ] **Phase 5 — Push full integration checkpoint.**
-- [ ] **Phase 6 — Deploy** (deferred): backend → Railway, frontend → Vercel with `BACKEND_URL`.
+- [x] **Phase 5 — Push full integration checkpoint.** All Phase 0–4 commits are on `origin/main`
+      (verified: remote `main` == local `37bbddf`; `FETCH_HEAD..HEAD` empty).
+- [ ] **Phase 6 — Deploy** — **BLOCKED, needs the account owner** (see Blockers). Backend → Railway
+      requires interactive `railway login` + the private FPT/Gemini/Tavily keys (neither available to a
+      non-interactive session with no `backend/.env`). Frontend → Vercel is otherwise ready (CLI
+      authed as `minh070607`, project linked, `SERPAPI_KEY` present) but `BACKEND_URL` can't be set
+      until the Railway URL exists. Nothing is deployed.
 
 ## API keys — status
 The account owner supplied FPT Cloud keys (GLM chat, Qwen-VL vision, Whisper STT, VN embedding),
@@ -78,9 +83,31 @@ new machine and don't have them, ask the account owner.
 > account. Use PowerShell, and the git push command in PROGRESS.md's environment notes.
 
 ## Blockers / needs the account owner
-- **Railway login** is interactive → the owner runs `railway login` before Phase 6 (backend deploy).
-- **Vercel**: `.vercel` link is gitignored; re-link with the project IDs in the plan, or the owner
-  runs the deploy. Backend must be deployed first so `BACKEND_URL` exists.
+Phase 6 confirmed blocked on **owner-only** prerequisites (a non-interactive assistant session cannot
+clear these). Exact remediation:
+
+1. **Interactive `railway login`.** The Railway CLI auth is a browser OAuth flow; it can't be driven
+   headlessly here. On the owner's machine: `npm i -g @railway/cli` (CLI isn't installed), then
+   `railway login` (or `railway login --browserless` and open the printed URL). Alternatively, create
+   a project token in the Railway dashboard and export `RAILWAY_TOKEN` for CI-style non-interactive use.
+2. **Private API keys are not on this machine.** `backend/.env` is absent and no FPT Cloud / Gemini /
+   Tavily key material exists locally, so `AI_MODE=live` can't be configured from here. The owner must
+   supply the values and set the Railway env vars using **both** the split + legacy names (plan
+   finding #2 table): `AI_CHAT_API_KEY`+`GLM_API_KEY`, `AI_VISION_API_KEY`+`QWEN_VL_API_KEY`,
+   `AI_EMBED_API_KEY`+`VN_EMBEDDING_API_KEY`, `AI_STT_API_KEY`+`WHISPER_V3_API_KEY`, plus
+   `GEMINI_API_KEY`, `TAVILY_API_KEY`, and `AI_MODE=live`,
+   `AI_BASE_URL=https://mkp-api.fptcloud.com`, `POSTGRES_DSN`, `QDRANT_URL`, `EMBEDDING_DIM=1024`,
+   `MOCK_GOOGLE_PLACES=true`.
+3. **`psql` isn't installed** for the one-time schema load (`psql "$DATABASE_URL" -f db/init.sql`).
+   Install `psql`, or run it via `railway run psql ...`, or use the Railway Postgres data console.
+4. **Seed jobs** (`python -m app.agent.seed_scam_patterns`, `python -m app.agent.seed_price_references`)
+   run once against the deployed DB/Qdrant after the backend deps are installed (Docker/Railway env).
+5. **Vercel is ready except `BACKEND_URL`.** CLI is authed (`minh070607`), `frontend/.vercel` is linked
+   to `nonai` (`prj_nHImfGpuP8LHiiAVmvlMXKS9mH9I` / `team_cdmOkWuR97A5rxthTxrn8VaE`), and `SERPAPI_KEY`
+   is set locally. Once the Railway URL exists: set `BACKEND_URL` (Production + Preview) + `SERPAPI_KEY`,
+   then `cd frontend && npx vercel --prod --yes --scope mdsat-s-projects`. Note the live
+   `nonai-three.vercel.app` currently serves the **pre-integration** frontend; this deploy ships the
+   integration build (works on mock when `BACKEND_URL` is unset).
 
 ## Change log
 - 2026-07-18: Repo cloned; frontend moved into `frontend/`; plan + progress docs written; first push.
@@ -90,3 +117,4 @@ new machine and don't have them, ask the account owner.
 - 2026-07-18: Phase 3 — wired **price-check** (receipt photo → `/api/chat` receipt mode; backend `reply` + `normalized_prices_vnd`, mock gauge/`PriceTable` fallback); `tsc --noEmit` clean. Remaining: profile country picker.
 - 2026-07-18: Phase 3 — wired **profile country picker** (`BottomSheet` over `COUNTRIES` → `setCountry`, mirrors `LanguageSwitcher`); **Phase 3 feature wiring complete**; `tsc --noEmit` clean. Next: Phase 4 docs.
 - 2026-07-18: Phase 4 — docs: top-level `README.md` now documents the monorepo + frontend↔backend integration + run steps (`.env.example` already complete from Phase 2). `tsc --noEmit` clean; local `npm run build` blocked by the `node_modules` junction under Turbopack (builds clean on Vercel). Deploy (Phases 5–6) deferred to the account owner.
+- 2026-07-18: Phase 5 — **verified** all Phase 0–4 commits are on `origin/main` (remote `main` == local `37bbddf`; the local tracking ref was stale, showing a false "ahead 9"). Phase 5 ticked. **Phase 6 (deploy) confirmed BLOCKED on owner-only prerequisites** — interactive `railway login` (non-interactive session can't drive browser OAuth) + the private FPT/Gemini/Tavily keys (no `backend/.env` on this machine); `railway`/`psql` also not installed. Frontend/Vercel is ready except `BACKEND_URL` (no Railway URL yet). Full remediation added to Blockers. Nothing deployed.
