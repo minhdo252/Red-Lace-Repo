@@ -1,0 +1,31 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="NónAI logomark">
+  <defs>
+    <linearGradient id="straw" x1="256" y1="118" x2="256" y2="392" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F0D89B"/>
+      <stop offset="0.55" stop-color="#E4BE73"/>
+      <stop offset="1" stop-color="#C9954B"/>
+    </linearGradient>
+    <linearGradient id="strawEdge" x1="256" y1="300" x2="256" y2="400" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D9A85B"/>
+      <stop offset="1" stop-color="#B37E38"/>
+    </linearGradient>
+  </defs>
+  <!-- chin straps (quai non) -->
+  <path d="M188 250 C 176 320, 182 372, 210 408" stroke="#5E8A5E" stroke-width="9" stroke-linecap="round" opacity="0.85"/>
+  <path d="M324 250 C 336 320, 330 372, 302 408" stroke="#5E8A5E" stroke-width="9" stroke-linecap="round" opacity="0.85"/>
+  <!-- brim underside -->
+  <path d="M96 322 Q 256 372 416 322 Q 372 352 256 356 Q 140 352 96 322 Z" fill="url(#strawEdge)"/>
+  <!-- hat body (non la front silhouette / shield) -->
+  <path d="M256 118 C 240 118 228 128 214 146 L 108 300 Q 96 318 108 328 Q 256 372 404 328 Q 416 318 404 300 L 298 146 C 284 128 272 118 256 118 Z" fill="url(#straw)" stroke="#B4823D" stroke-width="5"/>
+  <!-- woven bands -->
+  <path d="M150 250 Q 256 292 362 250" stroke="#C58F45" stroke-width="6" fill="none" stroke-linecap="round" opacity="0.7"/>
+  <path d="M176 205 Q 256 240 336 205" stroke="#C58F45" stroke-width="6" fill="none" stroke-linecap="round" opacity="0.7"/>
+  <path d="M202 162 Q 256 188 310 162" stroke="#C58F45" stroke-width="6" fill="none" stroke-linecap="round" opacity="0.6"/>
+  <!-- apex tip -->
+  <circle cx="256" cy="126" r="12" fill="#EBD08C" stroke="#B4823D" stroke-width="4"/>
+  <!-- AI spark -->
+  <g>
+    <path d="M256 300 l7 18 18 7 -18 7 -7 18 -7 -18 -18 -7 18 -7 z" fill="#FFFFFF"/>
+    <path d="M256 300 l7 18 18 7 -18 7 -7 18 -7 -18 -18 -7 18 -7 z" fill="#3EC6A8" opacity="0.35"/>
+  </g>
+</svg>

@@ -1,0 +1,160 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+import { AnimatePresence, motion } from "motion/react";
+import { ChevronLeft, Mic, Square, RotateCcw, ArrowLeftRight } from "lucide-react";
+import { ListeningOrb, Waveform } from "@/components/translate/ListeningOrb";
+import { ChatBubble } from "@/components/translate/ChatBubble";
+import { ScamBanner } from "@/components/translate/ScamBanner";
+import { TranscriptSummary } from "@/components/translate/TranscriptSummary";
+import { LanguageSwitcher } from "@/components/ui/LanguageSwitcher";
+import { useApp, useT } from "@/i18n";
+import { usePhase, useTimer, useStaggeredReveal } from "@/lib/hooks";
+import { formatDuration, delay } from "@/lib/utils";
+import { conversation } from "@/mocks/translate";
+
+type P = "idle" | "listening" | "processing" | "result";
+
+export default function TranslatePage() {
+  const t = useT("translate");
+  const router = useRouter();
+  const { locale } = useApp();
+  const { phase, setPhase } = usePhase<P>("idle");
+  const { seconds, reset } = useTimer(phase === "listening");
+
+  const revealing = phase === "result";
+  const shown = useStaggeredReveal(conversation, revealing, 900);
+  const allShown = shown.length === conversation.length;
+
+  const stop = async () => {
+    setPhase("processing");
+    await delay(1300);
+    setPhase("result");
+  };
+  const restart = () => {
+    reset();
+    setPhase("idle");
+  };
+
+  return (
+    <div className="va-bg relative flex h-full flex-col text-ink">
+      <header className="flex items-center gap-3 px-4 pb-2 pt-[max(env(safe-area-inset-top),0.75rem)]">
+        <button
+          onClick={() => router.back()}
+          aria-label="Back"
+          className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-surface text-ink shadow-[var(--shadow-soft)] active:scale-95"
+        >
+          <ChevronLeft size={22} />
+        </button>
+        <div className="flex-1">
+          <h1 className="font-display font-bold text-ink">{t.title}</h1>
+          <p className="text-[0.72rem] text-ink-mute">{t.subtitle}</p>
+        </div>
+        <LanguageSwitcher compact />
+      </header>
+
+      {/* language pair */}
+      <div className="flex justify-center pb-1">
+        <div className="inline-flex items-center gap-2 rounded-full bg-surface px-3.5 py-1.5 text-sm font-semibold text-ink shadow-[var(--shadow-soft)]">
+          <span>{locale.toUpperCase()}</span>
+          <ArrowLeftRight size={14} className="text-straw-deep" />
+          <span>VI</span>
+        </div>
+      </div>
+
+      {/* body */}
+      <div className="scroll-area no-scrollbar flex-1 overflow-y-auto px-4">
+        <AnimatePresence mode="wait">
+          {phase !== "result" ? (
+            <motion.div
+              key="orb"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex min-h-full flex-col items-center justify-center pb-8"
+            >
+              <button
+                onClick={() => phase === "idle" && setPhase("listening")}
+                aria-label={t.tapToSpeak}
+                className="flex flex-col items-center active:scale-[0.99]"
+              >
+                <ListeningOrb state={phase === "idle" ? "idle" : phase} />
+                <h2 className="mt-1 font-display text-xl font-bold text-ink">
+                  {phase === "idle" && t.tapToSpeak}
+                  {phase === "listening" && t.listening}
+                  {phase === "processing" && t.processing}
+                </h2>
+              </button>
+              {phase === "listening" && (
+                <>
+                  <div className="mt-4">
+                    <Waveform active />
+                  </div>
+                  <p className="mt-3 font-mono text-sm text-ink-mute">{formatDuration(seconds)}</p>
+                </>
+              )}
+            </motion.div>
+          ) : (
+            <motion.div key="chat" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-3 py-3">
+              {shown.map((turn, i) => (
+                <div key={i} className="space-y-3">
+                  <ChatBubble turn={turn} youLabel={t.you} themLabel={t.them} />
+                  {turn.scam && (
+                    <ScamBanner
+                      title={t.scamTitle}
+                      pattern={turn.scam.pattern}
+                      advice={turn.scam.advice}
+                      actionLabel={t.scamAction}
+                    />
+                  )}
+                </div>
+              ))}
+              {allShown && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.2 }}
+                  className="pt-2"
+                >
+                  <TranscriptSummary title={t.summaryTitle} priceLabel={t.priceHeard} />
+                </motion.div>
+              )}
+              <div className="h-2" />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* controls */}
+      <div className="shrink-0 px-4 pb-[max(env(safe-area-inset-bottom),1rem)] pt-2">
+        {phase === "idle" && (
+          <button
+            onClick={() => setPhase("listening")}
+            aria-label={t.tapToSpeak}
+            className="mx-auto grid h-[4.5rem] w-[4.5rem] place-items-center rounded-full bg-gradient-to-br from-straw to-straw-deep text-[#3a2c06] shadow-[var(--shadow-lift)] transition-transform active:scale-95"
+          >
+            <Mic size={30} strokeWidth={2.3} />
+          </button>
+        )}
+        {phase === "listening" && (
+          <button
+            onClick={stop}
+            aria-label={t.tapToStop}
+            className="mx-auto grid h-[4.5rem] w-[4.5rem] place-items-center rounded-full bg-danger text-white transition-transform active:scale-95"
+            style={{ animation: "sos-pulse 1.8s ease-out infinite" }}
+          >
+            <Square size={26} fill="currentColor" />
+          </button>
+        )}
+        {phase === "result" && (
+          <button
+            onClick={restart}
+            className="mx-auto flex items-center gap-2 rounded-full bg-surface px-5 py-3 font-semibold text-ink shadow-[var(--shadow-soft)] active:scale-95"
+          >
+            <RotateCcw size={18} /> {t.newConversation}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}

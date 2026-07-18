@@ -1,0 +1,219 @@
+/**
+ * Screen-keyed UI string dictionary.
+ * `en` is authored in full and is the source of truth for the type.
+ * Other locales are DeepPartial and merge over `en` (automatic fallback),
+ * so a locale never has to be complete to be usable.
+ *
+ * Migration note: this maps 1:1 to next-intl message JSON when a real i18n
+ * layer is added later — no call-site rework required.
+ */
+
+export const en = {
+  common: {
+    appName: "NónAI",
+    tagline: "Your shield while you explore Vietnam",
+    continue: "Continue",
+    back: "Back",
+    cancel: "Cancel",
+    done: "Done",
+    tryAgain: "Try again",
+    seeAll: "See all",
+    verified: "Verified",
+    new: "New",
+  },
+  nav: {
+    home: "Home",
+    map: "Map",
+    protect: "Protect",
+    activity: "Activity",
+    profile: "Profile",
+  },
+  onboarding: {
+    welcome: "Xin chào!",
+    welcomeSub: "I'm Nón — I'll help you travel Vietnam safely.",
+    chooseLanguage: "Choose your language",
+    chooseLanguageSub: "The whole app speaks it. You can change this anytime.",
+    login: "Let's get you protected",
+    loginSub: "Sign in so your embassy and emergency contacts are ready.",
+    continueGoogle: "Continue with Google",
+    continueApple: "Continue with Apple",
+    guest: "Continue as guest",
+    accountNote:
+      "Your home country, embassy and emergency contacts are set up automatically from your account.",
+    start: "Start exploring",
+  },
+  home: {
+    greeting: "Hi",
+    greetingSub: "You're covered. What can I check for you?",
+    protectedBadge: "Shield active",
+    quickTitle: "Quick help",
+    actions: {
+      translate: "Translate",
+      translateSub: "Two-way voice",
+      price: "Check price",
+      priceSub: "Snap a receipt",
+      tour: "Verify tour",
+      tourSub: "Paste a link",
+      sos: "Emergency",
+      sosSub: "Help now",
+    },
+    safetyTitle: "Today around you",
+    nearbyTitle: "Trusted nearby",
+    nearbySub: "Fair-priced, verified by travellers",
+    activityTitle: "Recent checks",
+  },
+  assistant: {
+    name: "Nón",
+    role: "Your AI travel guard",
+    online: "Always watching out for you",
+    greeting: "How can I protect you today?",
+    askPlaceholder: "Ask Nón, or describe what's happening…",
+    listening: "I'm listening…",
+    thinking: "Nón is thinking…",
+    tapToSpeak: "Hold to speak",
+    skills: "What I can do",
+    suggestions: "Try asking",
+    verdictSafe: "Looks safe",
+    verdictCaution: "Be careful",
+    verdictScam: "This looks like a scam",
+    actionTranslate: "Translate a conversation",
+    actionPrice: "Is this price fair?",
+    actionTour: "Check if this tour is real",
+    actionSituation: "Describe a situation to me",
+    actionEmergency: "I need help now",
+    doThis: "What you can do",
+  },
+  translate: {
+    title: "Live translate",
+    subtitle: "Tap, speak, and I'll translate both sides.",
+    tapToSpeak: "Tap to speak",
+    listening: "Listening…",
+    tapToStop: "Tap to stop",
+    processing: "Translating…",
+    you: "You",
+    them: "Them",
+    summaryTitle: "Conversation summary",
+    priceHeard: "Price mentioned",
+    scamTitle: "Heads up — possible scam",
+    scamAction: "How to handle this",
+    newConversation: "New conversation",
+  },
+  price: {
+    title: "Fair-price check",
+    subtitle: "Photograph a receipt, menu, or price board.",
+    takePhoto: "Take a photo",
+    upload: "Upload image",
+    sample: "Try a sample",
+    analyzing: "Reading your receipt",
+    resultTitle: "Price check",
+    overall: "Overall",
+    fair: "Fair price",
+    mid: "A bit high",
+    high: "Well above normal",
+    youPaid: "You paid",
+    reference: "Usual range here",
+    perItem: "Item by item",
+    area: "Area",
+    disclaimer:
+      "Prices are estimates from local references — a higher price doesn't always mean a scam.",
+    askLocal: "Politely ask about the difference",
+  },
+  tour: {
+    title: "Verify a tour or stay",
+    subtitle: "Paste a Facebook page or booking link.",
+    placeholder: "Paste a link to check…",
+    sampleLink: "Paste a sample link",
+    analyzing: "Investigating this listing",
+    reportTitle: "Trust report",
+    riskLow: "Looks legit",
+    riskMedium: "Be careful",
+    riskHigh: "High scam risk",
+    pageAge: "Page history",
+    reviewsTitle: "Reviews",
+    priceTitle: "Price vs. market",
+    flagsTitle: "What we noticed",
+    advice: "Our advice",
+  },
+  sos: {
+    title: "Emergency",
+    subtitle: "Stay calm. Tap who you need — I'll translate the call.",
+    holdHint: "Press and hold if you're in danger",
+    police: "Police",
+    ambulance: "Ambulance",
+    hotline: "Tourist hotline",
+    embassy: "Your embassy",
+    shareLocation: "Share my location",
+    callNow: "Call now",
+    liveTranslate: "Live translation on",
+    endCall: "End call",
+    connecting: "Connecting…",
+    interpreterOn: "Interpreter active",
+    yourNumbers: "Your numbers",
+    addNumber: "Add emergency number",
+    addTitle: "Add a number",
+    contactName: "Name",
+    contactPhone: "Phone number",
+    namePlaceholder: "e.g. Hotel front desk",
+    phonePlaceholder: "e.g. +84 24 3826 6919",
+    save: "Save",
+    emptyNumbers: "No saved numbers yet.",
+  },
+  map: {
+    title: "Around you",
+    nearbyTitle: "Nearby recommendations",
+    police: "Police",
+    hospital: "Hospital",
+    trusted: "Trusted seller",
+    embassy: "Embassy",
+  },
+  profile: {
+    title: "Profile",
+    guest: "Guest traveller",
+    language: "Language",
+    country: "Home country",
+    trips: "My checks",
+    safety: "Safety & privacy",
+    emergencyContacts: "Emergency contacts",
+    about: "About NónAI",
+    signOut: "Sign out",
+    privacyNote: "Photos and audio are processed on-device and never stored.",
+  },
+} as const;
+
+export type Dict = typeof en;
+// leaves widen to `string` so translations don't have to match the English literal
+type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : string };
+
+export const vi: DeepPartial<Dict> = {
+  common: { tagline: "Người bạn đồng hành an toàn của bạn ở Việt Nam", continue: "Tiếp tục", back: "Quay lại", cancel: "Huỷ", done: "Xong", tryAgain: "Thử lại", seeAll: "Xem tất cả", verified: "Đã xác minh", new: "Mới" },
+  nav: { home: "Trang chủ", map: "Bản đồ", protect: "Bảo vệ", activity: "Hoạt động", profile: "Cá nhân" },
+  onboarding: { welcome: "Xin chào!", welcomeSub: "Mình là Nón — mình sẽ giúp bạn đi Việt Nam an toàn.", chooseLanguage: "Chọn ngôn ngữ của bạn", chooseLanguageSub: "Cả ứng dụng sẽ dùng ngôn ngữ này. Đổi lại bất cứ lúc nào.", start: "Bắt đầu khám phá", guest: "Tiếp tục với tư cách khách" },
+  home: { greeting: "Chào", greetingSub: "Bạn đã được bảo vệ. Mình kiểm tra gì giúp bạn?", protectedBadge: "Đang bảo vệ", quickTitle: "Trợ giúp nhanh", actions: { translate: "Phiên dịch", translateSub: "Thoại hai chiều", price: "Kiểm tra giá", priceSub: "Chụp hoá đơn", tour: "Xác minh tour", tourSub: "Dán liên kết", sos: "Khẩn cấp", sosSub: "Cần trợ giúp" }, safetyTitle: "Quanh bạn hôm nay", nearbyTitle: "Đáng tin gần đây", activityTitle: "Kiểm tra gần đây" },
+  sos: { title: "Khẩn cấp", subtitle: "Hãy bình tĩnh. Chạm vào nơi bạn cần — mình sẽ dịch cuộc gọi.", police: "Công an", ambulance: "Cấp cứu", hotline: "Đường dây du lịch", embassy: "Đại sứ quán", yourNumbers: "Số của bạn", addNumber: "Thêm số khẩn cấp", addTitle: "Thêm số", contactName: "Tên", contactPhone: "Số điện thoại", namePlaceholder: "vd. Lễ tân khách sạn", phonePlaceholder: "vd. +84 24 3826 6919", save: "Lưu", emptyNumbers: "Chưa có số nào được lưu." },
+};
+
+export const zh: DeepPartial<Dict> = {
+  common: { tagline: "您游览越南时的安全护盾", continue: "继续", back: "返回", cancel: "取消", done: "完成", tryAgain: "重试", seeAll: "查看全部", verified: "已验证", new: "新" },
+  nav: { home: "主页", map: "地图", protect: "守护", activity: "记录", profile: "我的" },
+  onboarding: { welcome: "你好！", welcomeSub: "我是小笠 — 我会帮你安全游越南。", chooseLanguage: "选择你的语言", chooseLanguageSub: "整个应用都会使用它，随时可更改。", start: "开始探索", guest: "以访客身份继续" },
+  home: { greeting: "你好", greetingSub: "你已受到保护。需要我帮你查什么？", protectedBadge: "护盾开启", quickTitle: "快速帮助", actions: { translate: "翻译", translateSub: "双向语音", price: "查价格", priceSub: "拍收据", tour: "验证旅行团", tourSub: "粘贴链接", sos: "紧急", sosSub: "立即求助" }, safetyTitle: "今天你周围", nearbyTitle: "附近可信", activityTitle: "最近查询" },
+  sos: { title: "紧急", subtitle: "保持冷静。点击你需要的 — 我会翻译通话。", police: "警察", ambulance: "救护车", hotline: "旅游热线", embassy: "你的大使馆" },
+};
+
+export const ko: DeepPartial<Dict> = {
+  common: { tagline: "베트남 여행 중 당신의 방패", continue: "계속", back: "뒤로", cancel: "취소", done: "완료", tryAgain: "다시 시도", seeAll: "모두 보기", verified: "인증됨", new: "새로움" },
+  nav: { home: "홈", map: "지도", protect: "보호", activity: "활동", profile: "프로필" },
+  onboarding: { welcome: "안녕하세요!", welcomeSub: "저는 논이에요 — 베트남을 안전하게 여행하도록 도와드릴게요.", chooseLanguage: "언어를 선택하세요", chooseLanguageSub: "앱 전체가 이 언어로 표시돼요. 언제든 변경할 수 있어요.", start: "탐험 시작", guest: "게스트로 계속" },
+  home: { greeting: "안녕하세요", greetingSub: "보호되고 있어요. 무엇을 확인해 드릴까요?", protectedBadge: "방패 작동 중", quickTitle: "빠른 도움", actions: { translate: "번역", translateSub: "양방향 음성", price: "가격 확인", priceSub: "영수증 촬영", tour: "투어 검증", tourSub: "링크 붙여넣기", sos: "긴급", sosSub: "지금 도움" }, safetyTitle: "오늘 주변", nearbyTitle: "근처 신뢰 가능", activityTitle: "최근 확인" },
+  sos: { title: "긴급", subtitle: "침착하세요. 필요한 곳을 누르면 통화를 통역해 드려요.", police: "경찰", ambulance: "구급차", hotline: "관광 핫라인", embassy: "당신의 대사관" },
+};
+
+export const ru: DeepPartial<Dict> = {
+  common: { tagline: "Ваш щит во время путешествия по Вьетнаму", continue: "Продолжить", back: "Назад", cancel: "Отмена", done: "Готово", tryAgain: "Ещё раз", seeAll: "Все", verified: "Проверено", new: "Новое" },
+  nav: { home: "Главная", map: "Карта", protect: "Защита", activity: "История", profile: "Профиль" },
+  onboarding: { welcome: "Привет!", welcomeSub: "Я Нон — помогу вам безопасно путешествовать по Вьетнаму.", chooseLanguage: "Выберите язык", chooseLanguageSub: "Всё приложение будет на нём. Можно изменить в любой момент.", start: "Начать", guest: "Продолжить как гость" },
+  home: { greeting: "Привет", greetingSub: "Вы под защитой. Что проверить?", protectedBadge: "Щит активен", quickTitle: "Быстрая помощь", actions: { translate: "Перевод", translateSub: "Двусторонний голос", price: "Проверить цену", priceSub: "Снять чек", tour: "Проверить тур", tourSub: "Вставить ссылку", sos: "Экстренно", sosSub: "Помощь" }, safetyTitle: "Сегодня рядом", nearbyTitle: "Проверенные рядом", activityTitle: "Недавние проверки" },
+  sos: { title: "Экстренно", subtitle: "Сохраняйте спокойствие. Нажмите, что нужно — я переведу звонок.", police: "Полиция", ambulance: "Скорая", hotline: "Горячая линия для туристов", embassy: "Ваше посольство" },
+};
+
+export const dictionaries = { en, vi, zh, ko, ru } as const;

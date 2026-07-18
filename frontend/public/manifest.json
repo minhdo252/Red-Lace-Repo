@@ -1,0 +1,17 @@
+{
+  "name": "NónAI — Tourist Shield",
+  "short_name": "NónAI",
+  "description": "Your AI travel companion in Vietnam — fair-price checks, scam detection, and emergency help.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#EAF2E8",
+  "theme_color": "#EAF2E8",
+  "categories": ["travel", "utilities", "safety"],
+  "lang": "en",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
