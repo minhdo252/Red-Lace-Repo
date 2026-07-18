@@ -369,7 +369,7 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks) -> ChatR
     context_text = [str(message.get("content", "")) for message in active_history[-3:]]
 
     turn_result, translation_details, scam_result, threat_result = await asyncio.gather(
-        handle_turn(clean_text, history=orchestrator_history),
+        handle_turn(clean_text, history=orchestrator_history, images=[img.model_dump() for img in request.images]),
         _translate_for_chat(clean_text, nationality, native_language, context_text),
         _scan_scam_prefilter(clean_text, region=region),
         detect_threat(clean_text, session_id=request.session_id, conversation_context=context_text + [clean_text]),

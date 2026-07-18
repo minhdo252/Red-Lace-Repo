@@ -33,6 +33,7 @@ class ChatRequest(BaseModel):
     lon: float | None = None
     region: str | None = None
     history: list[ChatMessage] = Field(default_factory=list)
+    images: list[ImagePayload] = Field(default_factory=list)
 
 
 class ChatResponse(BaseModel):

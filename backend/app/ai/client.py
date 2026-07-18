@@ -110,20 +110,42 @@ def _is_whisper_hallucination(text: str) -> bool:
 class AIClient:
     def __init__(self) -> None:
         self.mode = settings.ai_mode.lower()
-        self._openai: Any | None = None
+        self._chat_client: Any | None = None
+        self._vision_client: Any | None = None
+        self._embed_client: Any | None = None
 
-    def _client(self) -> Any:
+    def _get_chat_client(self) -> Any:
         if AsyncOpenAI is None:
             raise RuntimeError("openai package is not installed; install backend requirements first")
-        if not settings.ai_api_key:
-            raise RuntimeError("AI_MODE=live requires AI_API_KEY")
-        if self._openai is None:
-            self._openai = AsyncOpenAI(
-                api_key=settings.ai_api_key,
-                base_url=settings.ai_marketplace_base_url,
+        if self._chat_client is None:
+            self._chat_client = AsyncOpenAI(
+                api_key=settings.ai_chat_api_key,
+                base_url=settings.ai_base_url,
                 timeout=settings.ai_request_timeout_seconds,
             )
-        return self._openai
+        return self._chat_client
+
+    def _get_vision_client(self) -> Any:
+        if AsyncOpenAI is None:
+            raise RuntimeError("openai package is not installed; install backend requirements first")
+        if self._vision_client is None:
+            self._vision_client = AsyncOpenAI(
+                api_key=settings.ai_vision_api_key,
+                base_url=settings.ai_base_url,
+                timeout=settings.ai_request_timeout_seconds,
+            )
+        return self._vision_client
+
+    def _get_embed_client(self) -> Any:
+        if AsyncOpenAI is None:
+            raise RuntimeError("openai package is not installed; install backend requirements first")
+        if self._embed_client is None:
+            self._embed_client = AsyncOpenAI(
+                api_key=settings.ai_embed_api_key,
+                base_url=settings.ai_base_url,
+                timeout=settings.ai_request_timeout_seconds,
+            )
+        return self._embed_client
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=4), reraise=True)
     async def chat(
@@ -139,7 +161,7 @@ class AIClient:
             )
 
         kwargs: dict[str, Any] = {
-            "model": settings.ai_model,
+            "model": settings.ai_chat_model,
             "messages": messages,
             "temperature": 0.2,
             "stream": False,
@@ -153,7 +175,7 @@ class AIClient:
         if response_format:
             kwargs["response_format"] = response_format
 
-        client = self._client()
+        client = self._get_chat_client()
         try:
             response = await client.chat.completions.create(**kwargs)
         except Exception:
@@ -202,7 +224,7 @@ class AIClient:
         }
         user_prompt = prompts.get(mode, "Read this image and return structured observations.")
         kwargs: dict[str, Any] = {
-            "model": settings.vision_model,
+            "model": settings.ai_vision_model,
             "temperature": 0.0,
             "stream": False,
             "response_format": {"type": "json_object"},
@@ -224,7 +246,7 @@ class AIClient:
             ],
         }
 
-        client = self._client()
+        client = self._get_vision_client()
         try:
             response = await client.chat.completions.create(**kwargs)
         except Exception:
@@ -244,8 +266,8 @@ class AIClient:
         if self.mode == "mock":
             return _mock_embedding(text, settings.embedding_dim)
 
-        response = await self._client().embeddings.create(
-            model=settings.embedding_model,
+        response = await self._get_embed_client().embeddings.create(
+            model=settings.ai_embed_model,
             input=[text],
         )
         return response.data[0].embedding
@@ -272,7 +294,7 @@ class AIClient:
         if initial_prompt:
             kwargs["prompt"] = initial_prompt
 
-        response = await self._client().audio.transcriptions.create(**kwargs)
+        response = await self._get_chat_client().audio.transcriptions.create(**kwargs)
         text = getattr(response, "text", "") or ""
         return "" if _is_whisper_hallucination(text) else text
 
