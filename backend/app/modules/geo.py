@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import math
+
 from app.db.postgres import get_pool
 
 GPS_DRIFT_FALLBACK_KM = 45.0
 
 
 def validate_lat_lon(lat: float, lon: float) -> None:
+    if not math.isfinite(lat) or not math.isfinite(lon):
+        raise ValueError("lat and lon must be finite numbers")
     if lat < -90 or lat > 90:
         raise ValueError("lat must be between -90 and 90")
     if lon < -180 or lon > 180:

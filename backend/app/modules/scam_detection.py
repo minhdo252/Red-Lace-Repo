@@ -14,8 +14,14 @@ from app.db.qdrant import get_client
 UNMATCHED_THRESHOLD = 0.6
 
 
-async def match_scam_pattern(text: str, category: str, region: str | None = None) -> dict[str, Any]:
-    vector = await ai_client.embed(text)
+async def match_scam_pattern(
+    text: str,
+    category: str,
+    region: str | None = None,
+    vector: list[float] | None = None,
+) -> dict[str, Any]:
+    if vector is None:
+        vector = await ai_client.embed(text)
     client = get_client()
     hits = (
         await client.query_points(

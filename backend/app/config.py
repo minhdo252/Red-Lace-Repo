@@ -25,9 +25,29 @@ class Settings(BaseSettings):
 
     ai_embed_api_key: str | None = None
     ai_embed_model: str = "Vietnamese_Embedding"
-    
+
+    ai_stt_api_key: str | None = None
     stt_model: str = "FPT.AI-whisper-large-v3-turbo"
     ai_request_timeout_seconds: int = 60
+
+    # Backward-compatible names used by earlier project .env examples.
+    glm_api_key: str | None = None
+    vn_embedding_api_key: str | None = None
+    whisper_v3_api_key: str | None = None
+    ai_api_key: str | None = None
+
+    # Module 1 latency budgets. The outer deadlines keep a single slow AI
+    # capability from holding the complete chat response open indefinitely.
+    stt_deadline_seconds: int = 30
+    translation_deadline_seconds: int = 15
+    orchestrator_deadline_seconds: int = 12
+    threat_deadline_seconds: int = 12
+    scam_deadline_seconds: int = 12
+    memory_compression_deadline_seconds: int = 10
+
+    # Audio admission limits are checked before and after decoding.
+    max_audio_bytes: int = 10 * 1024 * 1024
+    max_audio_duration_seconds: int = 60
 
     google_places_api_key: str | None = None
     # Server-side-only escape hatch for check_business_existence() while the

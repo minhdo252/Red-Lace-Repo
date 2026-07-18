@@ -6,16 +6,16 @@ from typing import Any
 
 
 THREAT_TO_SERVICE_PRIORITY: dict[str | None, list[str]] = {
-    "robbery_theft": ["police", "tourist_police", "embassy", "medical"],
-    "physical_violence": ["police", "medical", "tourist_police", "embassy"],
-    "unlawful_detention": ["police", "tourist_police", "embassy", "medical"],
-    "medical_emergency": ["medical", "police", "embassy", "tourist_police"],
-    "harassment_sexual": ["police", "tourist_police", "embassy", "medical"],
-    "financial_coercion": ["tourist_police", "police", "embassy", "medical"],
-    "sophisticated_scam": ["tourist_police", "police", "embassy", "medical"],
-    "isolation_disorientation": ["police", "tourist_police", "medical", "embassy"],
-    "universal_distress": ["police", "medical", "tourist_police", "embassy"],
-    None: ["police", "medical", "tourist_police", "fire", "embassy"],
+    "robbery_theft": ["police", "general_emergency", "tourist_police", "embassy", "medical"],
+    "physical_violence": ["police", "general_emergency", "medical", "tourist_police", "embassy"],
+    "unlawful_detention": ["police", "general_emergency", "tourist_police", "embassy", "medical"],
+    "medical_emergency": ["medical", "general_emergency", "police", "embassy", "tourist_police"],
+    "harassment_sexual": ["police", "general_emergency", "tourist_police", "embassy", "medical"],
+    "financial_coercion": ["tourist_police", "police", "general_emergency", "embassy", "medical"],
+    "sophisticated_scam": ["tourist_police", "police", "general_emergency", "embassy", "medical"],
+    "isolation_disorientation": ["police", "general_emergency", "tourist_police", "medical", "embassy"],
+    "universal_distress": ["general_emergency", "police", "medical", "tourist_police", "embassy"],
+    None: ["general_emergency", "police", "medical", "tourist_police", "fire", "embassy"],
 }
 
 

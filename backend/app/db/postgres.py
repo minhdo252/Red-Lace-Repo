@@ -101,6 +101,16 @@ async def ensure_runtime_schema() -> None:
         await conn.execute("ALTER TABLE sos_events ADD COLUMN IF NOT EXISTS location_text_en TEXT")
         await conn.execute("ALTER TABLE sos_events ADD COLUMN IF NOT EXISTS contacts_returned JSONB")
         await conn.execute("ALTER TABLE sos_events ADD COLUMN IF NOT EXISTS response_payload JSONB")
+        await conn.execute("ALTER TABLE emergency_hotlines ADD COLUMN IF NOT EXISTS source_url TEXT")
+        await conn.execute("ALTER TABLE emergency_hotlines ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ")
+        await conn.execute(
+            "ALTER TABLE emergency_hotlines ADD COLUMN IF NOT EXISTS verification_status TEXT NOT NULL DEFAULT 'unverified'"
+        )
+        await conn.execute("ALTER TABLE embassies ADD COLUMN IF NOT EXISTS source_url TEXT")
+        await conn.execute("ALTER TABLE embassies ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ")
+        await conn.execute(
+            "ALTER TABLE embassies ADD COLUMN IF NOT EXISTS verification_status TEXT NOT NULL DEFAULT 'unverified'"
+        )
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_sos_events_session_id ON sos_events (session_id)")
         await conn.execute(
             """
@@ -147,6 +157,22 @@ async def ensure_runtime_schema() -> None:
                 ('Hoi An', 'medical', '115', 'Cấp cứu Bệnh viện Đa khoa Hội An'),
                 ('Hoi An', 'tourist_police', '02353861304', 'Trung tâm Hỗ trợ Du khách thành phố Hội An')
             ON CONFLICT DO NOTHING
+            """
+        )
+        await conn.execute(
+            """
+            INSERT INTO emergency_hotlines
+                (region, service_type, phone_number, notes, source_url, verified_at, verification_status)
+            VALUES
+                ('Vietnam', 'general_emergency', '112',
+                 'National 24/7 emergency line for incidents, disasters, and urgent assistance',
+                 'https://eav.gov.vn/d/vi-VN/news-o/TONG-DAI-KHAN-CAP-QUOC-GIA-112-tiep-nhan-247-cac-thong-tin-SU-CO-THIEN-TAI-THAM-HOA-60-102-58621',
+                 '2026-07-18T00:00:00+07'::timestamptz, 'verified')
+            ON CONFLICT (region, service_type, phone_number) DO UPDATE SET
+                notes = EXCLUDED.notes,
+                source_url = EXCLUDED.source_url,
+                verified_at = EXCLUDED.verified_at,
+                verification_status = EXCLUDED.verification_status
             """
         )
         await conn.execute(

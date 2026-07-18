@@ -1,0 +1,108 @@
+{
+  "version": "1.1",
+  "namespace": "MODULE13_SYNTHETIC_V1",
+  "normalization_cases": [
+    {"id": "N001", "input": "taxi wants 800.000 for 2 km", "expected": "taxi wants 800000 for 2 km"},
+    {"id": "N002", "input": "price is 1,200,000 VND", "expected": "price is 1200000 VND"},
+    {"id": "N003", "input": "phone 903 123 456", "expected": "phone 903 123 456"},
+    {"id": "N004", "input": "GPS 21.0333 105.8500", "expected": "GPS 21.0333 105.8500"},
+    {"id": "N005", "input": "  too   many    spaces  ", "expected": "too many spaces"},
+    {"id": "N006", "input": "cost 120.000 and deposit 50.000", "expected": "cost 120000 and deposit 50000"}
+  ],
+  "pii_cases": [
+    {"id": "P001", "input": "card 4111 1111 1111 1111", "expected_contains": "[REDACTED_CARD]", "expected_absent": "4111"},
+    {"id": "P002", "input": "identity 123456789", "expected_contains": "[REDACTED_ID]", "expected_absent": "123456789"},
+    {"id": "P003", "input": "identity 123456789012", "expected_contains": "[REDACTED_ID]", "expected_absent": "123456789012"},
+    {"id": "P004", "input": "taxi price 800000 VND", "expected_contains": "800000", "expected_absent": "[REDACTED"},
+    {"id": "P005", "input": "email me at tourist@example.com", "expected_contains": "[REDACTED_EMAIL]", "expected_absent": "tourist@example.com"},
+    {"id": "P006", "input": "my phone is 0903 123 456", "expected_contains": "[REDACTED_PHONE]", "expected_absent": "0903"},
+    {"id": "P007", "input": "passport number C1234567", "expected_contains": "[REDACTED_PASSPORT]", "expected_absent": "C1234567"},
+    {"id": "P008", "input": "key sk-abcdefghijklmnopqrstuv", "expected_contains": "[REDACTED_API_KEY]", "expected_absent": "sk-abc"}
+  ],
+  "price_normalization_cases": [
+    {"id": "PN001", "input": "The taxi wants 800k", "expected": [800000]},
+    {"id": "PN002", "input": "Giá là 800.000 VND", "expected": [800000]},
+    {"id": "PN003", "input": "Tổng cộng 1,2 triệu", "expected": [1200000]},
+    {"id": "PN004", "input": "Tài xế đòi tám trăm nghìn", "expected": [800000]},
+    {"id": "PN005", "input": "Bún chả một trăm hai mươi nghìn", "expected": [120000]},
+    {"id": "PN006", "input": "Tour giá một triệu hai trăm nghìn", "expected": [1200000]},
+    {"id": "PN007", "input": "Phone 0903 123 456", "expected": []},
+    {"id": "PN008", "input": "The distance is 2 km", "expected": []},
+    {"id": "PN009", "input": "Ticket 100k and deposit 50k", "expected": [100000, 50000]},
+    {"id": "PN010", "input": "Gia hai muoi nghin", "expected": [20000]},
+    {"id": "PN011", "input": "Tài xế muốn lấy 800000 cho quãng đường 2 km", "expected": [800000]},
+    {"id": "PN012", "input": "Mã xác nhận OTP là 123456", "expected": []},
+    {"id": "PN013", "input": "Taxi phone code 123456", "expected": []},
+    {"id": "PN014", "input": "Những trẻ này 120000 đã gồm nước và rau rồi", "expected": [120000]}
+  ],
+  "scam_rule_cases": [
+    {"id": "S001", "text": "They charge 800k for 2 km", "expected_categories": ["price_scam"]},
+    {"id": "S002", "text": "This price is too expensive and feels like a rip off", "expected_categories": ["price_scam"]},
+    {"id": "S003", "text": "Transfer the deposit now on Zalo", "expected_categories": ["ghost_tour_pressure"]},
+    {"id": "S004", "text": "Pay immediately, there is no refund", "expected_categories": ["ghost_tour_pressure"]},
+    {"id": "S005", "text": "Only today, this is a private deal", "expected_categories": ["ghost_tour_pressure"]},
+    {"id": "S006", "text": "Taxi costs 80k for 5 km", "expected_categories": []},
+    {"id": "S007", "text": "The museum ticket costs 100k", "expected_categories": []},
+    {"id": "S008", "text": "Where is Hoan Kiem Lake?", "expected_categories": []},
+    {"id": "S009", "text": "Họ bảo tôi phải chuyển khuẩn ngay hôm nay, nếu không thì sẽ mất tiền cọc.", "expected_categories": ["ghost_tour_pressure"]}
+  ],
+  "threat_scan_cases": [
+    {"id": "T001", "text": "Where can I buy coffee?", "expected_threat": false, "expected_level": "NONE", "expected_category": null},
+    {"id": "T002", "text": "He pulled a knife and attacked me", "expected_threat": true, "expected_level": "CRITICAL", "expected_category": "physical_violence"},
+    {"id": "T003", "text": "I was robbed and my wallet is gone", "expected_threat": true, "expected_level": "CRITICAL", "expected_category": "robbery_theft"},
+    {"id": "T004", "text": "They took my passport and won't let me leave", "expected_threat": true, "expected_level": "CRITICAL", "expected_category": "unlawful_detention"},
+    {"id": "T005", "text": "I need an ambulance because I cannot breathe", "expected_threat": true, "expected_level": "CRITICAL", "expected_category": "medical_emergency"},
+    {"id": "T006", "text": "Someone is following me", "expected_threat": true, "expected_level": "HIGH", "expected_category": "harassment_sexual"},
+    {"id": "T007", "text": "They are forcing me to pay or else", "expected_threat": true, "expected_level": "HIGH", "expected_category": "financial_coercion"},
+    {"id": "T008", "text": "Please help me now", "expected_threat": true, "expected_level": "CRITICAL", "expected_category": "universal_distress"},
+    {"id": "T009", "text": "The movie had a knife scene yesterday", "expected_threat": true, "expected_level": "CRITICAL", "expected_category": "physical_violence", "expected_context_level": "NONE"},
+    {"id": "T010", "text": "How much is this souvenir knife?", "expected_threat": true, "expected_level": "CRITICAL", "expected_category": "physical_violence", "expected_context_level": "NONE"}
+  ],
+  "qdrant_patterns": [
+    {"id": "2f6c14e8-2ed4-5c51-a604-e8ad81aed001", "text": "The taxi demands 800k for a two kilometer ride", "category": "price_scam", "region": "Hanoi"},
+    {"id": "2f6c14e8-2ed4-5c51-a604-e8ad81aed002", "text": "The vendor charges ten times the normal price", "category": "price_scam", "region": "Hanoi"},
+    {"id": "2f6c14e8-2ed4-5c51-a604-e8ad81aed003", "text": "Transfer a private tour deposit immediately on Zalo", "category": "ghost_tour_pressure", "region": "Hanoi"},
+    {"id": "2f6c14e8-2ed4-5c51-a604-e8ad81aed004", "text": "Pay now because this offer is only available today", "category": "ghost_tour_pressure", "region": "Hoi An"}
+  ],
+  "chat_contract_cases": [
+    {"id": "C001", "native_language": "en", "nationality": "US", "text": "Where is Hoan Kiem Lake?", "speaker_role": "tourist", "region": "Hanoi", "expected_target_language": "vi", "expected_scam": null, "expected_threat": "NONE"},
+    {"id": "C002", "native_language": "en", "nationality": "US", "text": "The taxi demands 800k for a two kilometer ride", "speaker_role": "tourist", "region": "Hanoi", "expected_target_language": "vi", "expected_scam": "price_scam", "expected_scam_source": "qdrant_vector", "expected_threat": "NONE"},
+    {"id": "C003", "native_language": "ko", "nationality": "KR", "text": "Transfer the deposit now on Zalo", "speaker_role": "tourist", "region": "Hanoi", "expected_target_language": "vi", "expected_scam": "ghost_tour_pressure", "expected_threat": "NONE"},
+    {"id": "C004", "native_language": "en", "nationality": "GB", "text": "Please help me, he pulled a knife", "speaker_role": "tourist", "region": "Sapa", "expected_target_language": "vi", "expected_scam": null, "expected_threat": "CRITICAL"},
+    {"id": "C005", "native_language": "ja", "nationality": "JP", "text": "They took my passport and won't let me leave", "speaker_role": "tourist", "region": "Hoi An", "expected_target_language": "vi", "expected_scam": null, "expected_threat": "CRITICAL"},
+    {"id": "C006", "native_language": "en", "nationality": "AU", "text": "The movie had a knife scene yesterday", "speaker_role": "tourist", "region": "Hanoi", "expected_target_language": "vi", "expected_scam": null, "expected_threat": "NONE"},
+    {"id": "C007", "native_language": "zh", "nationality": "CN", "text": "The museum ticket costs 100k", "speaker_role": "tourist", "region": "Hanoi", "expected_target_language": "vi", "expected_scam": null, "expected_threat": "NONE"},
+    {"id": "C008", "native_language": "en", "nationality": "SG", "text": "Someone is following me", "speaker_role": "tourist", "region": "Sapa", "expected_target_language": "vi", "expected_scam": null, "expected_threat": "HIGH"}
+  ],
+  "chat_live_cases": [
+    {"id": "L001", "native_language": "en", "nationality": "US", "text": "The taxi driver wants 800k for 2 km.", "speaker_role": "tourist", "region": "Hanoi", "expected_target_language": "vi", "expected_scam": "price_scam", "expected_threat": "NONE", "expected_prices": [800000], "expected_detected_language": "en"},
+    {"id": "L002", "native_language": "ko", "nationality": "KR", "text": "Transfer the deposit now on Zalo.", "speaker_role": "tourist", "region": "Hanoi", "expected_target_language": "vi", "expected_scam": "ghost_tour_pressure", "expected_threat": "NONE", "expected_prices": [], "expected_detected_language": "en"},
+    {"id": "L003", "native_language": "en", "nationality": "GB", "text": "Please help me, he pulled a knife.", "speaker_role": "tourist", "region": "Sapa", "expected_target_language": "vi", "expected_scam": null, "expected_threat": "CRITICAL", "expected_prices": [], "expected_detected_language": "en"},
+    {"id": "L004", "native_language": "ja", "nationality": "JP", "text": "Where is the nearest train station?", "speaker_role": "tourist", "region": "Hanoi", "expected_target_language": "vi", "expected_scam": null, "expected_threat": "NONE", "expected_prices": [], "expected_detected_language": "en"}
+  ],
+  "audio_cases": [
+    {"id": "W001", "file": "../module13_whisper/audio/w001_price_question.wav", "reference": "Cho tôi hỏi bát phở này giá bao nhiêu?", "max_wer": 0.10, "expected_threat": "NONE", "expected_detected_language": "vi"},
+    {"id": "W002", "file": "../module13_whisper/audio/w002_price_scam.wav", "reference": "Tài xế muốn lấy tám trăm nghìn cho quãng đường hai cây số.", "max_wer": 0.60, "expected_threat": "NONE", "expected_prices": [800000], "expected_scam": "price_scam", "expected_detected_language": "vi"},
+    {"id": "W003", "file": "../module13_whisper/audio/w003_local_place.wav", "reference": "Tôi muốn đi từ phố cổ Hà Nội đến hồ Hoàn Kiếm.", "max_wer": 0.10, "expected_threat": "NONE", "expected_detected_language": "vi"},
+    {"id": "W004", "file": "../module13_whisper/audio/w004_mixed_language.wav", "reference": "Is this price for one person hay cho cả nhóm?", "max_wer": 0.75, "expected_threat": "NONE", "expected_detected_language": "vi"},
+    {"id": "W005", "file": "../module13_whisper/audio/w005_payment_pressure.wav", "reference": "Họ bảo tôi phải chuyển khoản ngay hôm nay, nếu không sẽ mất tiền cọc.", "max_wer": 0.20, "expected_threat": "NONE", "expected_scam": "ghost_tour_pressure", "expected_detected_language": "vi"},
+    {"id": "W006", "file": "../module13_whisper/audio/w006_sos_request.wav", "reference": "Xin hãy gọi cảnh sát, tôi đang bị giữ lại và không được rời đi.", "max_wer": 0.10, "expected_threat": "CRITICAL", "expected_detected_language": "vi"},
+    {"id": "W007", "file": "../module13_whisper/audio/w007_embassy.wav", "reference": "Đại sứ quán Hoa Kỳ ở Hà Nội cách đây bao xa?", "max_wer": 0.10, "expected_threat": "NONE", "expected_detected_language": "vi"},
+    {"id": "W008", "file": "../module13_whisper/audio/w008_numbers.wav", "reference": "Số điện thoại của tôi là không chín không ba, một hai ba, bốn năm sáu.", "max_wer": 0.70, "expected_threat": "NONE", "expected_detected_language": "vi"},
+    {"id": "W009", "file": "../module13_whisper/audio/w009_vendor_fast.wav", "reference": "Bún chả này một trăm hai mươi nghìn, đã bao gồm nước và rau rồi.", "max_wer": 0.60, "expected_threat": "NONE", "expected_prices": [120000], "expected_detected_language": "vi"},
+    {"id": "W010", "file": "../module13_whisper/audio/w010_multi_entity.wav", "reference": "Ngày mai tôi đi Sa Pa, cần đặt xe từ Hà Nội lúc sáu giờ sáng.", "max_wer": 0.30, "expected_threat": "NONE", "expected_detected_language": "vi"}
+  ],
+  "sos_routing_cases": [
+    {"id": "R001", "nationality": "US", "region": "Hanoi", "threat_category": "physical_violence", "source": "manual", "expected_primary": "police", "min_contacts": 5, "expected_embassy": true, "expected_fallback": false},
+    {"id": "R002", "nationality": "KR", "region": "Hanoi", "threat_category": "medical_emergency", "source": "manual", "expected_primary": "medical", "min_contacts": 5, "expected_embassy": true, "expected_fallback": false},
+    {"id": "R003", "nationality": "JP", "region": "Hanoi", "threat_category": "financial_coercion", "source": "smart_trigger", "expected_primary": "tourist_police", "min_contacts": 5, "expected_embassy": true, "expected_fallback": false},
+    {"id": "R004", "nationality": "GB", "region": "Sapa", "threat_category": "robbery_theft", "source": "manual", "expected_primary": "police", "min_contacts": 4, "expected_embassy": true, "expected_fallback": false},
+    {"id": "R005", "nationality": "AU", "region": "Sapa", "threat_category": "medical_emergency", "source": "manual", "expected_primary": "medical", "min_contacts": 4, "expected_embassy": true, "expected_fallback": false},
+    {"id": "R006", "nationality": "CN", "region": "Hoi An", "threat_category": "sophisticated_scam", "source": "smart_trigger", "expected_primary": "tourist_police", "min_contacts": 4, "expected_embassy": true, "expected_fallback": false},
+    {"id": "R007", "nationality": "SG", "region": "Hoi An", "threat_category": "physical_violence", "source": "manual", "expected_primary": "police", "min_contacts": 4, "expected_embassy": true, "expected_fallback": false},
+    {"id": "R008", "nationality": "US", "region": null, "threat_category": "universal_distress", "source": "manual", "expected_primary": "general_emergency", "min_contacts": 5, "expected_embassy": true, "expected_fallback": true},
+    {"id": "R009", "nationality": "KR", "region": null, "threat_category": "medical_emergency", "source": "smart_trigger", "expected_primary": "medical", "min_contacts": 4, "expected_embassy": true, "expected_fallback": true},
+    {"id": "R010", "nationality": "ZZ", "region": "Hoi An", "threat_category": "unlawful_detention", "source": "manual", "expected_primary": "police", "min_contacts": 4, "expected_embassy": false, "expected_fallback": false},
+    {"id": "R011", "nationality": "US", "region": "Da Nang", "threat_category": "universal_distress", "source": "manual", "expected_primary": "general_emergency", "min_contacts": 5, "expected_embassy": true, "expected_fallback": true}
+  ]
+}

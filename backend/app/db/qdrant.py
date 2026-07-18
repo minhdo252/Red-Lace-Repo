@@ -23,6 +23,13 @@ def get_client() -> AsyncQdrantClient:
     return _client
 
 
+async def close_client() -> None:
+    global _client
+    if _client is not None:
+        await _client.close()
+        _client = None
+
+
 async def ensure_collections() -> None:
     client = get_client()
     existing = {c.name for c in (await client.get_collections()).collections}

@@ -76,8 +76,14 @@ CREATE TABLE IF NOT EXISTS emergency_hotlines (
     region       TEXT NOT NULL,
     service_type TEXT NOT NULL, -- police, medical, tourist_police, fire
     phone_number TEXT NOT NULL,
-    notes        TEXT
+    notes        TEXT,
+    source_url   TEXT,
+    verified_at TIMESTAMPTZ,
+    verification_status TEXT NOT NULL DEFAULT 'unverified'
 );
+ALTER TABLE emergency_hotlines ADD COLUMN IF NOT EXISTS source_url TEXT;
+ALTER TABLE emergency_hotlines ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
+ALTER TABLE emergency_hotlines ADD COLUMN IF NOT EXISTS verification_status TEXT NOT NULL DEFAULT 'unverified';
 CREATE INDEX IF NOT EXISTS idx_emergency_hotlines_region ON emergency_hotlines (region);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_emergency_hotlines_region_service_phone
     ON emergency_hotlines (region, service_type, phone_number);
@@ -88,8 +94,14 @@ CREATE TABLE IF NOT EXISTS embassies (
     country_name TEXT NOT NULL,
     phone_number TEXT NOT NULL,
     address      TEXT,
-    region_hint  TEXT -- nearest city, for display only
+    region_hint  TEXT, -- nearest city, for display only
+    source_url   TEXT,
+    verified_at TIMESTAMPTZ,
+    verification_status TEXT NOT NULL DEFAULT 'unverified'
 );
+ALTER TABLE embassies ADD COLUMN IF NOT EXISTS source_url TEXT;
+ALTER TABLE embassies ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
+ALTER TABLE embassies ADD COLUMN IF NOT EXISTS verification_status TEXT NOT NULL DEFAULT 'unverified';
 CREATE INDEX IF NOT EXISTS idx_embassies_nationality ON embassies (nationality);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_embassies_nationality_phone
     ON embassies (nationality, phone_number);
@@ -139,6 +151,19 @@ INSERT INTO emergency_hotlines (region, service_type, phone_number, notes) VALUE
     ('Hoi An', 'medical', '115', 'Cấp cứu Bệnh viện Đa khoa Hội An'),
     ('Hoi An', 'tourist_police', '02353861304', 'Trung tâm Hỗ trợ Du khách thành phố Hội An')
 ON CONFLICT DO NOTHING;
+
+INSERT INTO emergency_hotlines
+    (region, service_type, phone_number, notes, source_url, verified_at, verification_status)
+VALUES
+    ('Vietnam', 'general_emergency', '112',
+     'National 24/7 emergency line for incidents, disasters, and urgent assistance',
+     'https://eav.gov.vn/d/vi-VN/news-o/TONG-DAI-KHAN-CAP-QUOC-GIA-112-tiep-nhan-247-cac-thong-tin-SU-CO-THIEN-TAI-THAM-HOA-60-102-58621',
+     '2026-07-18T00:00:00+07'::timestamptz, 'verified')
+ON CONFLICT (region, service_type, phone_number) DO UPDATE SET
+    notes = EXCLUDED.notes,
+    source_url = EXCLUDED.source_url,
+    verified_at = EXCLUDED.verified_at,
+    verification_status = EXCLUDED.verification_status;
 
 INSERT INTO embassies (nationality, country_name, phone_number, address, region_hint) VALUES
     ('KR', 'Hàn Quốc (South Korea)', '+84-24-3831-5111', 'Tầng 28 Lotte Center, 54 Liễu Giai, Ba Đình, Hà Nội', 'Hanoi'),

@@ -14,12 +14,26 @@ from dataclasses import dataclass, field
 from typing import Any
 
 try:  # Keep mock mode importable even before dependencies are installed locally.
-    from openai import AsyncOpenAI
+    from openai import (
+        APIConnectionError,
+        APITimeoutError,
+        AsyncOpenAI,
+        BadRequestError,
+        InternalServerError,
+        RateLimitError,
+    )
+
+    TRANSIENT_AI_ERRORS = (APIConnectionError, APITimeoutError, InternalServerError, RateLimitError)
 except ImportError:  # pragma: no cover - exercised only in bare local envs
     AsyncOpenAI = None  # type: ignore[assignment]
 
+    class BadRequestError(Exception):
+        pass
+
+    TRANSIENT_AI_ERRORS = (ConnectionError, TimeoutError)
+
 try:
-    from tenacity import retry, stop_after_attempt, wait_exponential
+    from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 except ImportError:  # pragma: no cover
 
     def retry(*_args: Any, **_kwargs: Any):
@@ -32,6 +46,9 @@ except ImportError:  # pragma: no cover
         return None
 
     def wait_exponential(**_kwargs: Any) -> None:
+        return None
+
+    def retry_if_exception_type(_types: Any) -> None:
         return None
 
 from app.config import settings
@@ -76,6 +93,15 @@ def _content_to_text(content: Any) -> str:
     return str(content)
 
 
+def _message_response_text(message: Any, *, allow_reasoning_fallback: bool) -> str:
+    """Read GLM structured output without leaking reasoning in normal replies."""
+
+    content = _content_to_text(getattr(message, "content", ""))
+    if not content.strip() and allow_reasoning_fallback:
+        return _content_to_text(getattr(message, "reasoning_content", ""))
+    return content
+
+
 def _mock_embedding(text: str, dim: int) -> list[float]:
     """Deterministic pseudo-embedding so mock mode's kNN calls don't crash."""
     digest = hashlib.sha256(text.encode("utf-8")).digest()
@@ -113,13 +139,14 @@ class AIClient:
         self._chat_client: Any | None = None
         self._vision_client: Any | None = None
         self._embed_client: Any | None = None
+        self._stt_client: Any | None = None
 
     def _get_chat_client(self) -> Any:
         if AsyncOpenAI is None:
             raise RuntimeError("openai package is not installed; install backend requirements first")
         if self._chat_client is None:
             self._chat_client = AsyncOpenAI(
-                api_key=settings.ai_chat_api_key,
+                api_key=settings.ai_chat_api_key or settings.glm_api_key or settings.ai_api_key,
                 base_url=settings.ai_base_url,
                 timeout=settings.ai_request_timeout_seconds,
             )
@@ -141,13 +168,32 @@ class AIClient:
             raise RuntimeError("openai package is not installed; install backend requirements first")
         if self._embed_client is None:
             self._embed_client = AsyncOpenAI(
-                api_key=settings.ai_embed_api_key,
+                api_key=settings.ai_embed_api_key or settings.vn_embedding_api_key or settings.ai_api_key,
                 base_url=settings.ai_base_url,
                 timeout=settings.ai_request_timeout_seconds,
             )
         return self._embed_client
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=4), reraise=True)
+    def _get_stt_client(self) -> Any:
+        if AsyncOpenAI is None:
+            raise RuntimeError("openai package is not installed; install backend requirements first")
+        if self._stt_client is None:
+            api_key = settings.ai_stt_api_key or settings.whisper_v3_api_key or settings.ai_api_key
+            if not api_key:
+                raise RuntimeError("speech transcription API key is not configured")
+            self._stt_client = AsyncOpenAI(
+                api_key=api_key,
+                base_url=settings.ai_base_url,
+                timeout=settings.ai_request_timeout_seconds,
+            )
+        return self._stt_client
+
+    @retry(
+        retry=retry_if_exception_type(TRANSIENT_AI_ERRORS),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=4),
+        reraise=True,
+    )
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -178,7 +224,7 @@ class AIClient:
         client = self._get_chat_client()
         try:
             response = await client.chat.completions.create(**kwargs)
-        except Exception:
+        except BadRequestError:
             if not response_format:
                 raise
             kwargs.pop("response_format", None)
@@ -200,7 +246,8 @@ class AIClient:
                 )
             return ChatResponse(tool_calls=parsed_calls)
 
-        return ChatResponse(content=_content_to_text(getattr(message, "content", "")))
+        content = _message_response_text(message, allow_reasoning_fallback=bool(response_format))
+        return ChatResponse(content=content)
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=4), reraise=True)
     async def vision(self, image_bytes: bytes, mode: str) -> dict[str, Any]:
@@ -260,7 +307,12 @@ class AIClient:
         parsed.setdefault("mode", mode)
         return parsed
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=4), reraise=True)
+    @retry(
+        retry=retry_if_exception_type(TRANSIENT_AI_ERRORS),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=4),
+        reraise=True,
+    )
     async def embed(self, text: str) -> list[float]:
         """Text embedding for Qdrant kNN lookups."""
         if self.mode == "mock":
@@ -272,7 +324,12 @@ class AIClient:
         )
         return response.data[0].embedding
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=4), reraise=True)
+    @retry(
+        retry=retry_if_exception_type(TRANSIENT_AI_ERRORS),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=4),
+        reraise=True,
+    )
     async def transcribe(
         self,
         audio_bytes: bytes,
@@ -294,9 +351,22 @@ class AIClient:
         if initial_prompt:
             kwargs["prompt"] = initial_prompt
 
-        response = await self._get_chat_client().audio.transcriptions.create(**kwargs)
+        response = await self._get_stt_client().audio.transcriptions.create(**kwargs)
         text = getattr(response, "text", "") or ""
         return "" if _is_whisper_hallucination(text) else text
+
+    async def close(self) -> None:
+        clients = {
+            id(client): client
+            for client in (self._chat_client, self._vision_client, self._embed_client, self._stt_client)
+            if client
+        }
+        for client in clients.values():
+            await client.close()
+        self._chat_client = None
+        self._vision_client = None
+        self._embed_client = None
+        self._stt_client = None
 
 
 ai_client = AIClient()
