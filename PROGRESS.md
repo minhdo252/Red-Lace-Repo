@@ -4,7 +4,7 @@
 > **where-are-we-now** log. It is updated and pushed at every checkpoint so any machine/account
 > can pull and continue exactly where the last one stopped.
 
-**Last updated:** 2026-07-18 · **Overall:** Phases 0–2 done. Phase 3 IN PROGRESS — Home, SOS, Translate, Tour-check, **Price-check** wired ✅ (typechecks clean); **Profile country picker REMAINING**. Deploy (Phase 6) not started.
+**Last updated:** 2026-07-18 · **Overall:** Phases 0–3 done — all Phase 3 feature wiring complete (Home, SOS, Translate, Tour-check, Price-check, Profile country picker) ✅ (typechecks clean). Phase 4 docs next. Deploy (Phase 6) not started.
 
 ## Status by phase
 - [x] **Phase 0 — Monorepo setup**
@@ -23,13 +23,13 @@
       `toTranslateTurn` mappers, base64 helpers), `sessionId` + `ensureSession` in
       `i18n/index.tsx` (+ locale-derived nationality default), `useGeolocation` in `lib/hooks.ts`,
       `frontend/.env.example`. Profile country picker lands with Phase 3.
-- [~] **Phase 3 — Feature wiring** (mock stays as the fallback everywhere; all typecheck clean):
+- [x] **Phase 3 — Feature wiring** (mock stays as the fallback everywhere; all typecheck clean):
   - [x] Home chat — text + real MediaRecorder voice + photo scan → `/api/chat` (`frontend/src/app/(tabs)/home/page.tsx`)
   - [x] SOS — live prioritized hotlines + embassy + resolved location, real `tel:` dialing → `/api/sos` (`frontend/src/app/sos/page.tsx`)
   - [x] Translate — real audio per utterance → `/api/chat`, accumulates turns + summary (`frontend/src/app/translate/page.tsx`, `components/translate/TranscriptSummary.tsx`)
   - [x] Tour-check — URL → `/api/chat` (triggers `check_ghost_tour`); verdict + advice from the AI answer (`frontend/src/app/tour-check/page.tsx`)
   - [x] **Price-check** — receipt photo → `/api/chat` (images, `mode:"receipt"`); on `source==="backend"` shows the AI `reply` + `normalized_prices_vnd`, otherwise the mock gauge/`PriceTable` fallback. The analysis animation is now purely visual; the real transition is driven by the awaited turn (mirrors tour-check). FileReader is read before the loader shows so a read failure can't strand the spinner. (`frontend/src/app/price-check/page.tsx`)
-  - [ ] **Profile country picker — NOT STARTED** (`frontend/src/app/(tabs)/profile/page.tsx`). Add a country selector calling `useApp().setCountry(c)` (the `COUNTRIES` list lives in `frontend/src/i18n/index.tsx`) so nationality (embassy/SOS) is user-chosen, not just the locale-derived default. `setCountry` already resets the session.
+  - [x] **Profile country picker** — the "Home country" row opens a `BottomSheet` listing `COUNTRIES` and calls `useApp().setCountry(c)` (mirrors `LanguageSwitcher`), so nationality (embassy/SOS) is user-chosen, not just the locale-derived default. `setCountry` already resets the session. (`frontend/src/app/(tabs)/profile/page.tsx`)
 - [ ] **Phase 4 — Docs + build check**: `backend/.env` (local, gitignored), update
       `.env.example`, top-level README; `cd frontend && npm run build`.
 - [ ] **Phase 5 — Push full integration checkpoint.**
@@ -82,3 +82,4 @@ new machine and don't have them, ask the account owner.
 - 2026-07-18: Phase 2 — frontend integration layer (proxy routes + api client + session context + geolocation); `tsc --noEmit` clean.
 - 2026-07-18: Phase 3 (partial) — wired Home chat, SOS, Translate, Tour-check to the backend (mock fallback intact); `tsc --noEmit` clean. **Remaining: price-check, profile country picker** (recipes above), then Phase 4 docs + Phase 6 deploy.
 - 2026-07-18: Phase 3 — wired **price-check** (receipt photo → `/api/chat` receipt mode; backend `reply` + `normalized_prices_vnd`, mock gauge/`PriceTable` fallback); `tsc --noEmit` clean. Remaining: profile country picker.
+- 2026-07-18: Phase 3 — wired **profile country picker** (`BottomSheet` over `COUNTRIES` → `setCountry`, mirrors `LanguageSwitcher`); **Phase 3 feature wiring complete**; `tsc --noEmit` clean. Next: Phase 4 docs.

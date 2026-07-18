@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   Globe,
   Flag,
@@ -10,6 +11,7 @@ import {
   ChevronRight,
   LogOut,
   Sparkles,
+  Check,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Screen } from "@/components/shell/Screen";
@@ -17,14 +19,16 @@ import { TopBar } from "@/components/shell/TopBar";
 import { Mascot } from "@/components/ui/Mascot";
 import { LanguageSwitcher } from "@/components/ui/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
-import { useApp, useT, LOCALES } from "@/i18n";
+import { BottomSheet } from "@/components/ui/BottomSheet";
+import { useApp, useT, LOCALES, COUNTRIES } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 export default function ProfilePage() {
   const t = useT("profile");
   const router = useRouter();
-  const { name, country, locale } = useApp();
+  const { name, country, setCountry, locale } = useApp();
   const localeMeta = LOCALES.find((l) => l.code === locale)!;
+  const [countryOpen, setCountryOpen] = useState(false);
 
   return (
     <Screen>
@@ -73,7 +77,7 @@ export default function ProfilePage() {
       {/* settings list */}
       <div className="mt-4 px-5">
         <div className="overflow-hidden rounded-[var(--radius-card)] bg-surface shadow-[var(--shadow-soft)]">
-          <Row icon={Flag} tint="bg-straw/20 text-straw-deep" label={t.country} value={`${country.flag} ${country.name}`} />
+          <Row icon={Flag} tint="bg-straw/20 text-straw-deep" label={t.country} value={`${country.flag} ${country.name}`} onClick={() => setCountryOpen(true)} />
           <Row icon={PhoneCall} tint="bg-danger/10 text-danger" label={t.emergencyContacts} value="3 saved" />
           <Row icon={ShieldCheck} tint="bg-moss-soft text-moss-strong" label={t.trips} value="6" />
           <Row icon={Lock} tint="bg-surface-2 text-ink-soft" label={t.safety} />
@@ -95,6 +99,47 @@ export default function ProfilePage() {
           <LogOut size={18} /> {t.signOut}
         </button>
       </div>
+
+      {/* country picker — sets nationality (drives the SOS embassy card + backend session) */}
+      <BottomSheet open={countryOpen} onClose={() => setCountryOpen(false)}>
+        <h3 className="mb-1 font-display text-lg font-bold text-ink">{t.country}</h3>
+        <p className="mb-4 text-sm text-ink-mute">Sets your embassy and emergency contacts.</p>
+        <div className="space-y-1.5">
+          {COUNTRIES.map((c) => {
+            const active = c.code === country.code;
+            return (
+              <button
+                key={c.code}
+                onClick={() => {
+                  setCountry(c);
+                  setCountryOpen(false);
+                }}
+                className={cn(
+                  "flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-left transition-colors",
+                  active ? "bg-moss-soft" : "hover:bg-surface-2",
+                )}
+              >
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-moss-soft text-lg">
+                  {c.flag}
+                </span>
+                <span className="flex-1">
+                  <span className={cn("block font-semibold", active ? "text-forest" : "text-ink")}>
+                    {c.name}
+                  </span>
+                  <span className={cn("block text-xs", active ? "text-forest/70" : "text-ink-mute")}>
+                    {c.embassy}
+                  </span>
+                </span>
+                {active && (
+                  <span className="grid h-6 w-6 place-items-center rounded-full bg-moss text-white">
+                    <Check size={14} strokeWidth={3} />
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </BottomSheet>
     </Screen>
   );
 }
@@ -105,15 +150,17 @@ function Row({
   label,
   value,
   last,
+  onClick,
 }: {
   icon: React.ComponentType<{ size?: number }>;
   tint: string;
   label: string;
   value?: string;
   last?: boolean;
+  onClick?: () => void;
 }) {
   return (
-    <button className={cn("flex w-full items-center gap-3 p-3.5 text-left active:bg-surface-2", !last && "border-b border-line")}>
+    <button onClick={onClick} className={cn("flex w-full items-center gap-3 p-3.5 text-left active:bg-surface-2", !last && "border-b border-line")}>
       <span className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-xl", tint)}>
         <Icon size={18} />
       </span>
