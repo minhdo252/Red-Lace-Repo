@@ -58,6 +58,31 @@ services:
         condition: service_started
       seed-crawler:
         condition: service_completed_successfully
+      seed-scam-patterns:
+        condition: service_completed_successfully
+
+  # -----------------------------------------------------------------------
+  # Seeds Qdrant `scam_patterns` (category=price_scam, ghost_tour_pressure)
+  # from the JSON corpus in backend/app/agent/seed_data/. No Playwright/
+  # browser needed — much lighter than seed-crawler, just embeddings +
+  # Qdrant upserts. Always exits 0 (see seed_scam_patterns.py docstring).
+  # Manual re-run: docker compose run --rm seed-scam-patterns
+  # -----------------------------------------------------------------------
+  seed-scam-patterns:
+    build:
+      context: ./backend
+    container_name: aitravelmate-seed-scam-patterns
+    restart: "no"                   # one-shot job, not a long-running service
+    env_file:
+      - .env
+    environment:
+      QDRANT_URL: http://qdrant:6333
+    volumes:
+      - ./backend/app:/app/app
+    entrypoint: ["python", "-m", "app.agent.seed_scam_patterns"]
+    depends_on:
+      qdrant:
+        condition: service_started
 
   # -----------------------------------------------------------------------
   # Simple HTTP crawler (static HTML only — documents SPA limitation)
