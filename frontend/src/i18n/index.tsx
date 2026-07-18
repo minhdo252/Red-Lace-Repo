@@ -9,6 +9,11 @@ import {
   useState,
 } from "react";
 import { dictionaries, en, type Dict } from "./strings";
+import {
+  createSessionRequest,
+  localeToNationality,
+  localeToNativeLanguage,
+} from "@/lib/api";
 
 export type LocaleCode = keyof typeof dictionaries;
 
@@ -71,6 +76,11 @@ type Ctx = {
   theme: ThemeMode;
   setTheme: (t: ThemeMode) => void;
   toggleTheme: () => void;
+  /** Backend session id (UUID), or null in mock mode. Lazily created. */
+  sessionId: string | null;
+  /** Create-or-return the backend session; null when no backend is configured. */
+  ensureSession: () => Promise<string | null>;
+  resetSession: () => void;
 };
 
 const LanguageContext = createContext<Ctx | null>(null);
@@ -80,20 +90,29 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const [country, setCountryState] = useState<CountryMeta>(COUNTRIES[0]);
   const [name, setName] = useState<string>("Minji");
   const [theme, setThemeState] = useState<ThemeMode>("light");
+  const [sessionId, setSessionIdState] = useState<string | null>(null);
 
   // hydrate from localStorage
   useEffect(() => {
     const stored = localStorage.getItem("nonai.locale") as LocaleCode | null;
+    const effectiveLocale = stored && stored in dictionaries ? stored : "en";
     if (stored && stored in dictionaries) setLocaleState(stored);
     const c = localStorage.getItem("nonai.country");
     if (c) {
       const found = COUNTRIES.find((x) => x.code === c);
       if (found) setCountryState(found);
+    } else {
+      // No saved country yet — default it from the chosen language so the backend
+      // session (and the SOS embassy card) isn't stuck on the KR default.
+      const derived = COUNTRIES.find((x) => x.code === localeToNationality(effectiveLocale));
+      if (derived) setCountryState(derived);
     }
     const n = localStorage.getItem("nonai.name");
     if (n) setName(n);
     const th = localStorage.getItem("nonai.theme") as ThemeMode | null;
     if (th === "light" || th === "dark") setThemeState(th);
+    const sid = localStorage.getItem("nonai.sessionId");
+    if (sid) setSessionIdState(sid);
   }, []);
 
   const setTheme = useCallback((t: ThemeMode) => {
@@ -113,11 +132,40 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const setLocale = useCallback((code: LocaleCode) => {
     setLocaleState(code);
     localStorage.setItem("nonai.locale", code);
+    // Language change invalidates the backend session (native_language differs).
+    setSessionIdState(null);
+    localStorage.removeItem("nonai.sessionId");
   }, []);
 
   const setCountry = useCallback((c: CountryMeta) => {
     setCountryState(c);
     localStorage.setItem("nonai.country", c.code);
+    // Nationality change invalidates the backend session too.
+    setSessionIdState(null);
+    localStorage.removeItem("nonai.sessionId");
+  }, []);
+
+  const ensureSession = useCallback(async (): Promise<string | null> => {
+    const existing = localStorage.getItem("nonai.sessionId");
+    if (existing) {
+      setSessionIdState(existing);
+      return existing;
+    }
+    const res = await createSessionRequest({
+      native_language: localeToNativeLanguage(locale),
+      nationality: country.code,
+    });
+    if (res.session_id) {
+      localStorage.setItem("nonai.sessionId", res.session_id);
+      setSessionIdState(res.session_id);
+      return res.session_id;
+    }
+    return null; // mock mode (no backend configured) — callers fall back to mock data
+  }, [locale, country]);
+
+  const resetSession = useCallback(() => {
+    setSessionIdState(null);
+    localStorage.removeItem("nonai.sessionId");
   }, []);
 
   const dict = useMemo(() => deepMerge(en, dictionaries[locale]), [locale]);
@@ -136,6 +184,9 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     theme,
     setTheme,
     toggleTheme,
+    sessionId,
+    ensureSession,
+    resetSession,
   };
 
   return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;

@@ -4,7 +4,7 @@
 > **where-are-we-now** log. It is updated and pushed at every checkpoint so any machine/account
 > can pull and continue exactly where the last one stopped.
 
-**Last updated:** 2026-07-18 · **Overall:** Phases 0–1 complete; starting Phase 2 (frontend integration layer).
+**Last updated:** 2026-07-18 · **Overall:** Phases 0–2 complete (integration layer typechecks); starting Phase 3 (feature wiring).
 
 ## Status by phase
 - [x] **Phase 0 — Monorepo setup**
@@ -16,9 +16,13 @@
 - [x] **Phase 1 — Backend unblock**: created `backend/app/ai/glm_chat.py` (GLM-5.2 OpenAI-compatible
       chat + tool-calling; `glm_chat()` + `has_api_key()`). Matches the `client.py` / `critic.py`
       call sites; `py_compile` clean. Full runtime import validates on Railway (deps not installed locally).
-- [ ] **Phase 2 — Frontend integration layer**: `frontend/src/lib/api.ts`, proxy routes
-      (`/api/session`, `/api/chat`, `/api/sos`), `sessionId` in `i18n/index.tsx`,
-      `useGeolocation`, nationality derive + Profile picker, response mappers.
+- [x] **Phase 2 — Frontend integration layer** (typechecks clean, `tsc --noEmit` = 0):
+      `frontend/src/lib/backend.ts` (server helper), proxy routes `/api/session` + `/api/chat`
+      (text/audio/images, self-heals session on 404) + `/api/sos`, `frontend/src/lib/api.ts`
+      (fetch wrappers, `localeToNativeLanguage`/`localeToNationality`, `toAssistantMessage`/
+      `toTranslateTurn` mappers, base64 helpers), `sessionId` + `ensureSession` in
+      `i18n/index.tsx` (+ locale-derived nationality default), `useGeolocation` in `lib/hooks.ts`,
+      `frontend/.env.example`. Profile country picker lands with Phase 3.
 - [ ] **Phase 3 — Feature wiring**: home chat/voice/photo, translate, price-check, tour-check,
       SOS (each keeps its mock as fallback).
 - [ ] **Phase 4 — Docs + build check**: `backend/.env` (local, gitignored), update
@@ -49,3 +53,4 @@ new machine and don't have them, ask the account owner.
 ## Change log
 - 2026-07-18: Repo cloned; frontend moved into `frontend/`; plan + progress docs written; first push.
 - 2026-07-18: Phase 1 — added `backend/app/ai/glm_chat.py` (unblocks live chat + critic).
+- 2026-07-18: Phase 2 — frontend integration layer (proxy routes + api client + session context + geolocation); `tsc --noEmit` clean.

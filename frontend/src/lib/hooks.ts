@@ -71,6 +71,46 @@ export function useFakeProgress(
   return { index, percent, label: steps[index]?.label ?? "" };
 }
 
+export type GeoCoords = { lat: number; lon: number } | null;
+
+/**
+ * One-shot geolocation. `request()` resolves to `{lat, lon}` (or null if denied /
+ * unavailable) and never rejects, so callers can `await` it inline before a chat
+ * or SOS request. Factored out of the duplicated logic in the two map components.
+ */
+export function useGeolocation() {
+  const [coords, setCoords] = useState<GeoCoords>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const request = useCallback((): Promise<GeoCoords> => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setError("geolocation unavailable");
+      return Promise.resolve(null);
+    }
+    setLoading(true);
+    return new Promise<GeoCoords>((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const c = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+          setCoords(c);
+          setLoading(false);
+          setError(null);
+          resolve(c);
+        },
+        (err) => {
+          setLoading(false);
+          setError(err.message);
+          resolve(null);
+        },
+        { enableHighAccuracy: true, timeout: 8000 },
+      );
+    });
+  }, []);
+
+  return { coords, loading, error, request };
+}
+
 /** Reveal an array of items one at a time on a stagger (for chat/list drips). */
 export function useStaggeredReveal<T>(items: T[], active: boolean, stepMs = 650) {
   const [count, setCount] = useState(0);
