@@ -1,11 +1,12 @@
 """Generic vision tool (doc section 3): one entrypoint, mode-dispatched output.
 
-receipt/dish are handwritten-menu reads: they go through the real Qwen2.5-VL
-menu OCR (app/ai/qwen_vl.py::ai_detect_menu) whenever a region and a
-QWEN_VL_API_KEY are available, returning `ready_items` already shaped for
-app/modules/price_comparison.py::compare_price (item_name + price_vnd). Without
-a region or a key (e.g. AI_MODE=mock with no provider keys) they fall back to
-the generic ai_client.vision stub so the stack still boots keyless.
+receipt/dish are handwritten-menu reads: they ALWAYS go through the real
+Qwen2.5-VL menu OCR (app/ai/qwen_vl.py::ai_detect_menu), returning `ready_items`
+already shaped for app/modules/price_comparison.py::compare_price (item_name +
+price_vnd). Module 2.1 never falls back to the generic/mock ai_client.vision
+stub for menu reads — a missing vision key (QWEN_VL_API_KEY or AI_VISION_API_KEY)
+or region raises a clear error (surfaced upstream as a retake/degradation)
+rather than fabricating a price.
 
 qwen_vl is left exactly as-is: it is synchronous and reads from an image
 *path*, so read_image writes the incoming bytes to a temp file and runs the
@@ -54,15 +55,20 @@ async def read_image(
 ) -> dict[str, Any]:
     """Read an image and return structured text.
 
-    receipt/dish → real Qwen VL menu OCR when `region` and QWEN_VL_API_KEY are
-    both present; otherwise the generic ai_client.vision stub.
+    receipt/dish → the real tuned Qwen VL menu OCR (Module 2.1), always. This is
+    never the mock/generic ai_client.vision fallback: a missing vision key or
+    region raises a clear error (surfaced upstream as a retake/degradation), so
+    Module 2.1 never fabricates a price. The OCR key is resolved inside qwen_vl
+    and accepts either QWEN_VL_API_KEY or the split AI_VISION_API_KEY.
     page_transparency/chat_screenshot → ai_client.vision (page_transparency is
     then post-processed into the domain-age-shaped trust signal).
     """
     if mode not in VALID_MODES:
         raise ValueError(f"invalid mode {mode!r}, must be one of {sorted(VALID_MODES)}")
 
-    if mode in MENU_OCR_MODES and region and os.getenv("QWEN_VL_API_KEY"):
+    if mode in MENU_OCR_MODES:
+        if not region:
+            raise ValueError(f"region is required for menu OCR mode {mode!r}")
         return await _read_menu_ocr(image_bytes, mode, region, category)
 
     result = await ai_client.vision(image_bytes, mode)

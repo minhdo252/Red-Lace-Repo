@@ -219,14 +219,17 @@ def _strip_code_fence(text: str) -> str:
 
 
 def _require_api_key() -> str:
-    """Read QWEN_VL_API_KEY from the environment (the backend/seed services
-    load it from .env via env_file). Fails clearly if it is unset OR empty,
-    rather than letting a blank key surface as an opaque auth error later."""
-    key = os.getenv("QWEN_VL_API_KEY")
+    """Read the vision API key from the environment. Accepts the tuned-OCR name
+    (QWEN_VL_API_KEY) or the split gateway name (AI_VISION_API_KEY), so Module
+    2.1's real OCR runs regardless of which the deploy set (both appear in
+    .env.example). Fails clearly if neither is set, rather than letting a blank
+    key surface as an opaque auth error later."""
+    key = os.getenv("QWEN_VL_API_KEY") or os.getenv("AI_VISION_API_KEY")
     if not key:
         raise RuntimeError(
-            "QWEN_VL_API_KEY is not set. Add it to .env (loaded by the backend "
-            "service via env_file) or export it in the environment."
+            "No vision API key set. Add QWEN_VL_API_KEY (or AI_VISION_API_KEY) to "
+            ".env (loaded by the backend service via env_file) or export it in the "
+            "environment."
         )
     return key
 
@@ -253,7 +256,7 @@ def ai_detect_menu(
     Hoi An/Ancient Town) — off by default since the table isn't
     enum-constrained and new regions may legitimately get added.
 
-    Reads the API key from the QWEN_VL_API_KEY environment variable.
+    Reads the API key from QWEN_VL_API_KEY or AI_VISION_API_KEY.
     Streams the model's response, parses it, then splits items into:
       - ready_rows: uncertain=False AND price_vnd present -> safe to
         insert as a new price_references observation.
