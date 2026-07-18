@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install chromium
 
 COPY app ./app
+COPY start.sh ./start.sh
 
 # Run as a non-root user matching the typical host UID/GID so bind-mounted
 # output (e.g. test/output/ from the crawler services) isn't root-owned.
@@ -31,6 +32,6 @@ USER pwuser
 
 EXPOSE 8000
 
-# Bind the port Railway/host injects via $PORT (falls back to 8000 for local/compose).
-# Shell form so ${PORT} is expanded at runtime. No --reload in production.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# start.sh binds the port Railway/host injects via $PORT (falls back to 8000 for
+# local/compose), seeds Qdrant + price_references in the background, then serves.
+CMD ["bash", "start.sh"]

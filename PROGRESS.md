@@ -101,9 +101,11 @@ base tables too (see the Phase 6 code commit), so the app self-bootstraps its fu
 hotlines/embassies on first boot against a fresh managed Postgres.
 
 **Seeds (Qdrant `scam_patterns` + Postgres `price_references`):** baked into the deploy via
-`backend/railway.json` `startCommand` — they run in the background on container start (idempotent,
-always exit 0, read the committed `seed_data/` + `output/crawled_restaurants_cache.json`), so they
-never block the `/health` check. Re-run manually with
+`backend/start.sh` (the Dockerfile `CMD`) — it runs both seeds in the background on container start,
+then `exec`s uvicorn, so seeding never blocks the `/health` check. Both seeds are idempotent, always
+exit 0, and read the committed `seed_data/` + `output/crawled_restaurants_cache.json`. First boot
+seeded 30 price-scam + 20 ghost-tour patterns into Qdrant and 592 `price_references` rows from 57
+restaurants (then embeds them into the `item_names` collection). Re-run manually with
 `railway ssh --service nonai-backend "python -m app.agent.seed_scam_patterns"` (needs a registered SSH key).
 
 **Backend env vars set on Railway** (values held privately — set from `backend/.env`, never committed):
