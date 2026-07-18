@@ -21,9 +21,10 @@ import { Screen } from "@/components/shell/Screen";
 import { TopBar } from "@/components/shell/TopBar";
 import { Button } from "@/components/ui/Button";
 import { AnalysisLoader } from "@/components/ui/AnalysisLoader";
-import { useT } from "@/i18n";
+import { useApp, useT } from "@/i18n";
 import { usePhase, useFakeProgress } from "@/lib/hooks";
-import { cn, formatVnd } from "@/lib/utils";
+import { cn, formatVnd, delay } from "@/lib/utils";
+import { chatRequest, localeToNativeLanguage } from "@/lib/api";
 import { analysisSteps, riskyTour, cleanTour } from "@/mocks/tour-check";
 import type { TourReport } from "@/mocks/types";
 
@@ -45,20 +46,61 @@ const sevCls = {
 
 export default function TourCheckPage() {
   const t = useT("tour");
+  const { locale, country, ensureSession } = useApp();
   const { phase, setPhase } = usePhase<P>("input");
   const [url, setUrl] = useState("");
-
-  const report: TourReport =
-    /cheap|halong|luxury|deal/i.test(url) || url === SAMPLE ? riskyTour : cleanTour;
+  const [report, setReport] = useState<TourReport>(cleanTour);
 
   const { index, percent } = useFakeProgress(
     analysisSteps.map((label) => ({ label })),
     3400,
     phase === "analyzing",
-    () => setPhase("report"),
   );
 
-  const run = () => url.trim() && setPhase("analyzing");
+  const mockReport = (link: string): TourReport =>
+    /cheap|halong|luxury|deal/i.test(link) || link === SAMPLE ? riskyTour : cleanTour;
+
+  // Ask the backend (which runs check_ghost_tour) whether the link is legit, then
+  // drive the verdict + advice from its answer. The metric cards use the closest
+  // template as an illustrative breakdown. Falls back fully to mock when offline.
+  const run = async () => {
+    const link = url.trim();
+    if (!link) return;
+    setPhase("analyzing");
+    const sid = await ensureSession();
+    const [env] = await Promise.all([
+      chatRequest({
+        session_id: sid,
+        native_language: localeToNativeLanguage(locale),
+        nationality: country.code,
+        speaker_role: "tourist",
+        text: `Kiểm tra giúp tôi tour/dịch vụ này có đáng tin không: ${link}`,
+      }),
+      delay(1200),
+    ]);
+    if (env.source === "backend") {
+      const ghost = env.tools_invoked?.find((tl) => tl.tool === "check_ghost_tour")?.result as
+        | { safety?: { label?: string }; risk_level?: string }
+        | undefined;
+      const label = ghost?.safety?.label ?? "";
+      const rl = ghost?.risk_level ?? "";
+      const cats = new Set((env.scam_flags ?? []).map((f) => f.category));
+      const risk: TourReport["risk"] =
+        label.includes("Không an toàn") || rl === "high" || cats.has("ghost_tour_pressure")
+          ? "high"
+          : rl === "medium"
+            ? "medium"
+            : label.includes("An toàn") || rl === "low"
+              ? "low"
+              : "medium";
+      const base = risk === "low" ? cleanTour : riskyTour;
+      setReport({ ...base, risk, handle: link, advice: env.reply || base.advice });
+    } else {
+      setReport(mockReport(link));
+    }
+    setPhase("report");
+  };
+
   const rc = riskCfg[report.risk];
 
   return (
@@ -84,7 +126,9 @@ export default function TourCheckPage() {
                 <input
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && run()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void run();
+                  }}
                   placeholder={t.placeholder}
                   className="flex-1 bg-transparent text-sm text-ink placeholder:text-ink-mute focus:outline-none"
                 />
@@ -105,7 +149,7 @@ export default function TourCheckPage() {
               </p>
             </div>
 
-            <Button block size="lg" className="mt-auto mb-2" onClick={run} disabled={!url.trim()}>
+            <Button block size="lg" className="mt-auto mb-2" onClick={() => void run()} disabled={!url.trim()}>
               <Sparkles size={18} /> {t.analyzing}
             </Button>
           </motion.div>
