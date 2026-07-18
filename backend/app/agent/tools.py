@@ -25,27 +25,32 @@ from app.modules.business_check import check_business_existence
 from app.modules.domain_check import check_domain_age
 from app.modules.ghost_tour_score import check_ghost_tour
 from app.modules.image_reader import read_image
-from app.modules.pricing import estimate_fair_price
+from app.modules.price_comparison import compare_price
 from app.modules.scam_detection import match_scam_pattern
 from app.modules.translation import translate_or_get_hotline
 
 TOOL_SPECS: list[dict[str, Any]] = [
     {
-        "name": "estimate_fair_price",
+        "name": "compare_price",
         "description": (
-            "Estimate whether an observed price is fair for an item in a region using "
-            "Bayesian fusion of an LLM prior and historical data. Only ever raises a "
-            "'higher than reference' or 'suspiciously low / bait price' flag with a "
-            "confidence level — never concludes scam or not-scam on its own."
+            "Compare an observed price for a dish/item against a similarity-weighted "
+            "reference from comparable local listings (Qdrant kNN over real embeddings, "
+            "0.75 similarity gate + head-phrase gate). Falls back to a live web search "
+            "when no confident local comparable exists. Only ever raises a 'higher than "
+            "reference' flag with a percentage — never concludes scam on its own."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "item": {"type": "string"},
                 "region": {"type": "string"},
+                "category": {
+                    "type": "string",
+                    "description": "Item category filter, e.g. 'food'. Defaults to 'food'.",
+                },
                 "observed_price": {
                     "type": "number",
-                    "description": "Observed price in VND. Omit for a quote-only lookup.",
+                    "description": "Observed price in VND. Omit for a reference-only lookup.",
                 },
             },
             "required": ["item", "region"],
@@ -167,7 +172,7 @@ async def _dispatch_read_image(args: dict[str, Any]) -> dict[str, Any]:
 
 
 TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = {
-    "estimate_fair_price": lambda args: estimate_fair_price(**args),
+    "compare_price": lambda args: compare_price(**args),
     "read_image": _dispatch_read_image,
     "match_scam_pattern": lambda args: match_scam_pattern(**args),
     "check_domain_age": lambda args: check_domain_age(**args),

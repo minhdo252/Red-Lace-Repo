@@ -331,10 +331,11 @@ async def _run_orchestrator_for_chat(
     text: str,
     history: list[dict[str, Any]],
     images: list[dict[str, Any]],
+    region: str | None = None,
 ) -> dict[str, Any]:
     try:
         result = await asyncio.wait_for(
-            handle_turn(text, history=history, images=images),
+            handle_turn(text, history=history, images=images, region=region),
             timeout=settings.orchestrator_deadline_seconds,
         )
         result.setdefault("degraded", False)
@@ -503,6 +504,7 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks) -> ChatR
             clean_text,
             history=orchestrator_history,
             images=[image.model_dump() for image in request.images],
+            region=region,
         ),
         _translate_for_chat(clean_text, nationality, native_language, context_text, speaker_role),
         _scan_scam_prefilter(clean_text, region=region),

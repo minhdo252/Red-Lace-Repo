@@ -1,17 +1,20 @@
-"""Single orchestrator + tool-calling agent (doc section 3).
+"""Single orchestrator + tool-calling agent (orchestration_flow.md, ORCH subgraph).
 
-Deliberately not a multi-agent swarm: one model loop that calls tools and
-reasons over their results, with a critic pass gating any risk conclusion,
-and a hard safety rule that keeps emergency dialing out of the agent's reach
-entirely (trigger_sos is not in its tool set — see app/agent/tools.py).
+Deliberately not a multi-agent swarm: one bounded model loop that calls tools and
+reasons over their results, with a critic pass gating any risk conclusion, and a hard
+safety rule that keeps emergency dialing out of the agent's reach entirely (trigger_sos
+is not in its tool set — see app/agent/tools.py).
 
-Images (module 2.1 receipts/dishes, module 2.2 Page Transparency
-screenshots — doc section 7, signal 2) are read via read_image() *before*
-the tool-calling loop starts, not left for the model to request as a
-tool call: a model has no way to "type back" raw image bytes it was never
-actually shown as text, so read_image can't realistically be a model-
-initiated tool call for image *input*. The already-computed results are
-injected into the conversation as context instead.
+The loop is wrapped by a deterministic pre/post pipeline in app/routers/chat.py (STT,
+PII redaction, parallel translate / scam-prefilter / threat, compose, persist) — none of
+that is the orchestrator's concern.
+
+Three stages:
+  1. _parse_images_upfront — VLM-read every attached image BEFORE the loop. A model can't
+     round-trip raw image bytes back to itself as a tool-call argument, so image *input*
+     is read up front and injected into the conversation as context.
+  2. _run_tool_loop       — the bounded LLM tool-calling loop.
+  3. handle_turn          — runs the two stages, then the risk gate + critic pass.
 """
 
 from __future__ import annotations
@@ -28,7 +31,11 @@ from app.modules.image_reader import read_image
 MAX_TOOL_ITERATIONS = 5
 
 # Tool outcomes that count as a "risk conclusion" and must go through the critic pass.
-RISK_TOOLS = {"estimate_fair_price", "match_scam_pattern", "check_ghost_tour"}
+RISK_TOOLS = {"compare_price", "match_scam_pattern", "check_ghost_tour"}
+
+TOOL_LOOP_TIMEOUT_REPLY = (
+    "Xin lỗi, mình xử lý hơi lâu — bạn thử hỏi lại ngắn gọn hơn nhé."
+)
 
 SYSTEM_PROMPT = """\
 You are the AITravelMate orchestrator: a travel companion and interpreter for tourists \
@@ -57,47 +64,64 @@ def _is_risk_flag(tool_name: str, result: dict[str, Any]) -> bool:
     return bool(result.get("flag")) or bool(result.get("flagged_as_new_candidate"))
 
 
-async def _read_images(images: list[dict[str, Any]]) -> tuple[list[str], dict[str, Any] | None]:
-    """Read every attached image up front. Returns (context notes for the
-    model, the most recent page_transparency read — check_ghost_tour only
-    takes one). A bad image is surfaced as an error note, same philosophy
-    as call_tool()'s error-as-data handling, rather than crashing the turn."""
+async def _parse_images_upfront(
+    images: list[dict[str, Any]],
+    region: str | None = None,
+) -> tuple[list[str], dict[str, Any] | None, list[dict[str, Any]]]:
+    """Stage 1. Read every attached image up front and, for menu OCR reads
+    (receipt/dish), deterministically compare each confidently-priced item
+    against local references via compare_price — the fair-price verdict the OCR
+    already handed us shouldn't wait on the model to re-request it.
+
+    Returns (context notes for the model, the most recent successful
+    page_transparency read — check_ghost_tour only takes one, the compare_price
+    invocations run from OCR items). `region` is threaded from the chat request:
+    read_image needs it to run the real Qwen VL OCR, and compare_price needs it
+    to scope the kNN lookup. A bad image is surfaced as an error note, same
+    philosophy as call_tool()'s error-as-data handling, rather than crashing the
+    turn."""
     notes: list[str] = []
     page_transparency_result: dict[str, Any] | None = None
+    image_invocations: list[dict[str, Any]] = []
 
     for img in images:
         mode = img.get("mode")
         try:
             image_bytes = base64.b64decode(img["image_base64"])
-            result = await read_image(image_bytes, mode)
+            result = await read_image(image_bytes, mode, region=region)
         except Exception as exc:  # noqa: BLE001 - surface as data, don't crash the turn
             result = {"error": str(exc)}
 
-        if mode == "page_transparency" and "error" not in result:
+        if mode == "page_transparency" and isinstance(result, dict) and "error" not in result:
             page_transparency_result = result
         notes.append(f"[read_image mode={mode}] {result}")
 
-    return notes, page_transparency_result
+        # Menu OCR hands back ready_items already shaped for compare_price
+        # (item_name -> item, price_vnd -> observed_price). Run them now so the
+        # fair-price judgement is in context before the model reasons. Needs a
+        # region (compare_price scopes its kNN by region); without one the OCR
+        # path didn't run either, so there's nothing to compare.
+        if region and isinstance(result, dict):
+            for item in result.get("ready_items") or []:
+                args = {
+                    "item": item["item_name"],
+                    "region": region,
+                    "category": result.get("category", "food"),
+                    "observed_price": item["price_vnd"],
+                }
+                comparison = await call_tool("compare_price", args)
+                image_invocations.append({"tool": "compare_price", "arguments": args, "result": comparison})
+                notes.append(f"[compare_price item={args['item']}] {comparison}")
+
+    return notes, page_transparency_result, image_invocations
 
 
-async def handle_turn(
-    user_text: str,
-    history: list[dict[str, Any]] | None = None,
-    images: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """Run one orchestrator turn. `history` is the already-compressed transcript
-    (summary + last N turns) — compression itself is a session/frontend concern,
-    not the orchestrator's (doc section 4). `images` are read before this turn's
-    model call."""
-
-    image_notes, page_transparency_result = await _read_images(images or [])
-
-    messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
-    messages.extend(history or [])
-    if image_notes:
-        messages.append({"role": "user", "content": "\n".join(image_notes)})
-    messages.append({"role": "user", "content": user_text})
-
+async def _run_tool_loop(
+    messages: list[dict[str, Any]],
+    page_transparency_result: dict[str, Any] | None,
+) -> tuple[str, list[dict[str, Any]], bool]:
+    """Stage 2. Bounded tool-calling loop. Returns (final_text, tools_invoked,
+    risk_flag_raised)."""
     tools_invoked: list[dict[str, Any]] = []
     risk_flag_raised = False
     final_text = ""
@@ -144,11 +168,44 @@ async def handle_turn(
                 }
             )
     else:
-        final_text = "Xin lỗi, mình xử lý hơi lâu — bạn thử hỏi lại ngắn gọn hơn nhé."
+        final_text = TOOL_LOOP_TIMEOUT_REPLY
 
-    result: dict[str, Any] = {"reply": final_text, "tools_invoked": tools_invoked}
+    return final_text, tools_invoked, risk_flag_raised
 
-    if risk_flag_raised:
-        result["critic"] = await critic_pass(final_text, {"tools_invoked": tools_invoked})
+
+async def handle_turn(
+    user_text: str,
+    history: list[dict[str, Any]] | None = None,
+    images: list[dict[str, Any]] | None = None,
+    region: str | None = None,
+) -> dict[str, Any]:
+    """Run one orchestrator turn. `history` is the already-compressed transcript
+    (summary + last N turns) — compression itself is a session/frontend concern, not the
+    orchestrator's. `images` are VLM-read before this turn's model call. `region` is the
+    resolved chat region; it lets the upfront image stage run the real menu OCR and
+    compare the extracted prices against local references."""
+
+    image_notes, page_transparency_result, image_invocations = await _parse_images_upfront(
+        images or [], region
+    )
+
+    messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages.extend(history or [])
+    if image_notes:
+        messages.append({"role": "user", "content": "\n".join(image_notes)})
+    messages.append({"role": "user", "content": user_text})
+
+    final_text, tools_invoked, risk_flag_raised = await _run_tool_loop(
+        messages, page_transparency_result
+    )
+
+    # OCR-driven price comparisons are part of the turn's evidence and can raise a
+    # risk flag of their own (an overpriced menu item), same as an in-loop tool call.
+    all_invocations = image_invocations + tools_invoked
+    image_risk = any(_is_risk_flag(inv["tool"], inv["result"]) for inv in image_invocations)
+
+    result: dict[str, Any] = {"reply": final_text, "tools_invoked": all_invocations}
+    if risk_flag_raised or image_risk:
+        result["critic"] = await critic_pass(final_text, {"tools_invoked": all_invocations})
 
     return result

@@ -1,23 +1,44 @@
-"""Generic vision tool (doc section 3): one tool, mode-dispatched output schema.
+"""Generic vision tool (doc section 3): one entrypoint, mode-dispatched output.
 
-mode="page_transparency" gets extra post-processing here for module 2.2
-signal 2 (doc section 7): the raw VLM read of a Facebook Page Transparency
-screenshot is turned into the same page_age_days/risk shape
-app/modules/domain_check.py already uses for WHOIS domain age, plus a
-recent_name_change flag, so app/modules/ghost_tour_score.py can consume
-both signals identically without doing its own date parsing.
+receipt/dish are handwritten-menu reads: they go through the real Qwen2.5-VL
+menu OCR (app/ai/qwen_vl.py::ai_detect_menu) whenever a region and a
+QWEN_VL_API_KEY are available, returning `ready_items` already shaped for
+app/modules/price_comparison.py::compare_price (item_name + price_vnd). Without
+a region or a key (e.g. AI_MODE=mock with no provider keys) they fall back to
+the generic ai_client.vision stub so the stack still boots keyless.
+
+qwen_vl is left exactly as-is: it is synchronous and reads from an image
+*path*, so read_image writes the incoming bytes to a temp file and runs the
+blocking OCR in a worker thread (asyncio.to_thread) to avoid stalling the
+event loop.
+
+mode="page_transparency" still goes through ai_client.vision and gets extra
+post-processing here for module 2.2 signal 2 (doc section 7): the raw VLM read
+of a Facebook Page Transparency screenshot is turned into the same
+page_age_days/risk shape app/modules/domain_check.py already uses for WHOIS
+domain age, plus a recent_name_change flag, so app/modules/ghost_tour_score.py
+can consume both signals identically without doing its own date parsing.
 """
 
 from __future__ import annotations
 
+import asyncio
+import os
+import tempfile
 from datetime import datetime, timezone
 from typing import Any
 
 from dateutil import parser as dateutil_parser
 
 from app.ai.client import ai_client
+from app.ai.qwen_vl import ai_detect_menu
 
 VALID_MODES = {"receipt", "dish", "page_transparency", "chat_screenshot"}
+
+# Menu-OCR modes: a photographed bill/menu (receipt) or a dish/menu shot (dish).
+# These are the ones that carry dish names + prices worth extracting with the
+# tuned Qwen VL menu OCR.
+MENU_OCR_MODES = {"receipt", "dish"}
 
 # Mirrors app/modules/domain_check.py's WHOIS threshold — a Facebook page
 # younger than this is treated as suspicious the same way a freshly
@@ -25,13 +46,92 @@ VALID_MODES = {"receipt", "dish", "page_transparency", "chat_screenshot"}
 RISK_THRESHOLD_DAYS = 180
 
 
-async def read_image(image_bytes: bytes, mode: str) -> dict[str, Any]:
+async def read_image(
+    image_bytes: bytes,
+    mode: str,
+    region: str | None = None,
+    category: str = "food",
+) -> dict[str, Any]:
+    """Read an image and return structured text.
+
+    receipt/dish → real Qwen VL menu OCR when `region` and QWEN_VL_API_KEY are
+    both present; otherwise the generic ai_client.vision stub.
+    page_transparency/chat_screenshot → ai_client.vision (page_transparency is
+    then post-processed into the domain-age-shaped trust signal).
+    """
     if mode not in VALID_MODES:
         raise ValueError(f"invalid mode {mode!r}, must be one of {sorted(VALID_MODES)}")
+
+    if mode in MENU_OCR_MODES and region and os.getenv("QWEN_VL_API_KEY"):
+        return await _read_menu_ocr(image_bytes, mode, region, category)
+
     result = await ai_client.vision(image_bytes, mode)
     if mode == "page_transparency":
         result = _postprocess_page_transparency(result)
     return result
+
+
+def _image_suffix(image_bytes: bytes) -> str:
+    """Pick a file suffix from the image's magic bytes so qwen_vl's
+    mimetype-by-extension detection (app/ai/qwen_vl.py::_encode_image) gets the
+    right content-type hint instead of blindly assuming JPEG."""
+    if image_bytes.startswith(b"\x89PNG"):
+        return ".png"
+    if image_bytes.startswith(b"\xff\xd8"):
+        return ".jpg"
+    if image_bytes.startswith(b"RIFF") and image_bytes[8:12] == b"WEBP":
+        return ".webp"
+    return ".jpg"
+
+
+async def _read_menu_ocr(
+    image_bytes: bytes,
+    mode: str,
+    region: str,
+    category: str,
+) -> dict[str, Any]:
+    """Bridge read_image's async, bytes-based contract to qwen_vl's synchronous,
+    path-based ai_detect_menu. qwen_vl is not modified: the bytes are written to
+    a temp file and the blocking OCR runs in a worker thread. Returns confident
+    priced rows as `ready_items` (already in compare_price's item_name/price_vnd
+    shape) and everything else as `needs_review`."""
+    fd, path = tempfile.mkstemp(suffix=_image_suffix(image_bytes))
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(image_bytes)
+        extraction = await asyncio.to_thread(ai_detect_menu, path, region, category)
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+    return {
+        "mode": mode,
+        "source": "qwen_vl",
+        "region": region,
+        "category": category,
+        "parse_error": extraction.parse_error,
+        "unreadable_regions": extraction.unreadable_regions,
+        # Confident + priced rows, already in compare_price(item, observed_price)
+        # shape: item_name -> item, price_vnd -> observed_price.
+        "ready_items": [
+            {"item_name": row.item_name, "price_vnd": row.price_vnd}
+            for row in extraction.ready_rows
+        ],
+        # Uncertain / unpriced reads — never auto-fed to pricing; kept so a human
+        # or the model can see what could not be confidently read.
+        "needs_review": [
+            {
+                "name_raw": item.name_raw,
+                "price_raw": item.price_raw,
+                "price_vnd": item.price_vnd,
+                "uncertain": item.uncertain,
+                "notes": item.notes,
+            }
+            for item in extraction.needs_review
+        ],
+    }
 
 
 def _postprocess_page_transparency(result: dict[str, Any]) -> dict[str, Any]:

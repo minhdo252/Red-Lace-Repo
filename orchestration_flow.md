@@ -19,14 +19,14 @@ flowchart TD
     subgraph ORCH["Orchestrator loop — up to 5 iterations"]
         I --> J["Upfront VLM parse (if image)<br/>Qwen2.5-VL-7B, injected into context"]
         J --> K["LLM Tool Loop<br/>Llama-3.3-70B-Instruct"]
-        K --> L["estimate_fair_price<br/>Qdrant kNN, gate 0.75 + prefix"]
+        K --> L["compare_price<br/>Qdrant kNN, gate 0.75 + head-phrase prefix"]
         K --> M["match_scam_pattern<br/>Qdrant kNN vs scam_patterns"]
         K --> N["check_ghost_tour<br/>6 signals, parallel"]
         L -- below gate --> L2["Web fallback<br/>gemini-3.1-flash-lite, search-grounded<br/>writes back to Postgres + Qdrant"]
         L2 --> K
         M --> K
         N --> K
-        K -- "loop exits: done or 5 iters" --> O{"Risk flagged?<br/>from estimate_fair_price / check_ghost_tour"}
+        K -- "loop exits: done or 5 iters" --> O{"Risk flagged?<br/>from compare_price / check_ghost_tour"}
         O -- yes --> P["Critic pass<br/>2nd LLM call, confirms explicit warning"]
         O -- no --> Q["turn_result"]
         P --> Q

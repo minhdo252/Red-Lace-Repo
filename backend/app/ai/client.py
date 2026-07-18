@@ -206,47 +206,38 @@ class AIClient:
                 content="[mock] Đã ghi nhận. (Sử dụng AI_MODE=live để kết nối AI Marketplace.)"
             )
 
-        kwargs: dict[str, Any] = {
-            "model": settings.ai_chat_model,
-            "messages": messages,
-            "temperature": 0.2,
-            "stream": False,
-        }
-        if tools:
-            kwargs["tools"] = [
-                tool if tool.get("type") == "function" else {"type": "function", "function": tool}
-                for tool in tools
-            ]
-            kwargs["tool_choice"] = "auto"
-        if response_format:
-            kwargs["response_format"] = response_format
+        # Live: delegate to the shared GLM-5.2 client (app/ai/glm_chat.py) so the
+        # orchestrator, critic, and every other chat caller use one payload. GLM-5.2
+        # is a reasoning model, so max_tokens is set generously enough that the final
+        # answer is reached after the reasoning tokens (a small budget => empty
+        # content). glm_chat is a blocking SDK call; run it off the event loop.
+        import asyncio
 
-        client = self._get_chat_client()
-        try:
-            response = await client.chat.completions.create(**kwargs)
-        except BadRequestError:
-            if not response_format:
-                raise
-            kwargs.pop("response_format", None)
-            response = await client.chat.completions.create(**kwargs)
+        from app.ai.glm_chat import glm_chat
 
-        choice = response.choices[0]
-        message = choice.message
-        raw_tool_calls = getattr(message, "tool_calls", None) or []
-        if raw_tool_calls:
-            parsed_calls: list[ToolCall] = []
-            for idx, call in enumerate(raw_tool_calls):
-                fn = call.function
-                parsed_calls.append(
-                    ToolCall(
-                        id=call.id or f"call_{idx}",
-                        name=fn.name,
-                        arguments=_loads_object(fn.arguments),
-                    )
-                )
-            return ChatResponse(tool_calls=parsed_calls)
+        glm_response = await asyncio.to_thread(
+            glm_chat,
+            messages,
+            tools=tools,
+            response_format=response_format,
+            temperature=0.2,
+            max_tokens=2048,
+        )
 
-        content = _message_response_text(message, allow_reasoning_fallback=bool(response_format))
+        if glm_response.tool_calls:
+            return ChatResponse(
+                tool_calls=[
+                    ToolCall(id=call.id, name=call.name, arguments=call.arguments)
+                    for call in glm_response.tool_calls
+                ]
+            )
+
+        # Final answer is `content`; fall back to reasoning only for structured
+        # (response_format) calls where an empty content would otherwise break a
+        # downstream JSON parse.
+        content = glm_response.content
+        if not content and response_format:
+            content = glm_response.reasoning
         return ChatResponse(content=content)
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=4), reraise=True)
