@@ -6,4 +6,6 @@
 # so re-running them on every boot is safe and cheap after the first time.
 ( python -u -m app.agent.seed_scam_patterns; python -u -m app.agent.seed_price_references ) &
 
-exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}"
+# `python -m uvicorn` (not the bare `uvicorn` console script): import-based, so it
+# works even where the script dir isn't on the runtime PATH (Railway's exec env).
+exec python -m uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}"

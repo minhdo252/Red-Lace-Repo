@@ -5,6 +5,7 @@
     "dockerfilePath": "Dockerfile"
   },
   "deploy": {
+    "startCommand": "bash start.sh",
     "healthcheckPath": "/health"
   }
 }
