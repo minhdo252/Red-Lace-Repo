@@ -16,20 +16,16 @@ import {
 } from "lucide-react";
 import type { AssistantMessage, AssistantAction, AssistantVerdict } from "@/mocks/assistant";
 import { Markdown } from "@/components/ui/Markdown";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
-const verdictCfg: Record<
-  AssistantVerdict,
-  { label: string; icon: typeof ShieldAlert; bg: string; text: string }
-> = {
-  safe: { label: "Looks safe", icon: ShieldCheck, bg: "bg-fair/12", text: "text-fair" },
-  caution: {
-    label: "Be careful",
-    icon: ShieldQuestion,
-    bg: "bg-mid/18",
-    text: "text-[oklch(0.5_0.12_70)]",
-  },
-  scam: { label: "Likely a scam", icon: ShieldAlert, bg: "bg-danger/12", text: "text-danger" },
+// Visual config per verdict; the label text comes from i18n so the badge speaks
+// the user's chosen language.
+const verdictCfg: Record<AssistantVerdict, { icon: typeof ShieldAlert; bg: string; text: string }> = {
+  safe: { icon: ShieldCheck, bg: "bg-fair/12", text: "text-fair" },
+  caution: { icon: ShieldQuestion, bg: "bg-mid/18", text: "text-[oklch(0.5_0.12_70)]" },
+  scam: { icon: ShieldAlert, bg: "bg-danger/12", text: "text-danger" },
+  unknown: { icon: ShieldQuestion, bg: "bg-ink/8", text: "text-ink-soft" },
 };
 
 const actionIcon = {
@@ -52,8 +48,15 @@ export function AssistantReply({
   doThisLabel: string;
   onAction?: (a: AssistantAction) => void;
 }) {
+  const t = useT("assistant");
   const v = msg.verdict ? verdictCfg[msg.verdict] : null;
-  const verdictLabel = msg.verdictLabel ?? v?.label;
+  const verdictLabel = !msg.verdict
+    ? undefined
+    : msg.verdict === "caution" && msg.priceCaution
+      ? t.verdictPriceHigh
+      : { safe: t.verdictSafe, caution: t.verdictCaution, scam: t.verdictScam, unknown: t.verdictUnknown }[
+          msg.verdict
+        ];
 
   return (
     <motion.div

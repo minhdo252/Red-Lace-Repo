@@ -1,6 +1,6 @@
 /** The AI assistant ("Nón") — the centre of the app. */
 
-export type AssistantVerdict = "safe" | "caution" | "scam";
+export type AssistantVerdict = "safe" | "caution" | "scam" | "unknown";
 
 export type AssistantAction = {
   label: string;
@@ -13,9 +13,9 @@ export type AssistantMessage = {
   text: string;
   image?: string; // object URL of a photo the user sent
   verdict?: AssistantVerdict;
-  /** Overrides the verdict badge label (e.g. "Price looks high" for a price-only
-   * caution, so we name the issue instead of the generic "Be careful"). */
-  verdictLabel?: string;
+  /** Marks a caution that is driven only by price, so the badge reads the
+   * localized "Price looks high" instead of the generic "Be careful". */
+  priceCaution?: boolean;
   pattern?: string;
   reasons?: string[];
   actions?: AssistantAction[];

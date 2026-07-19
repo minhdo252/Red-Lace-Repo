@@ -197,6 +197,21 @@ function isOverpriced(env: ChatEnvelope): boolean {
   return (env.scam_flags ?? []).some((f) => f.category === PRICE_CATEGORY);
 }
 
+/** Did the app actually run a price comparison (price route or the compare_price
+ * tool)? Distinguishes a real price check from ordinary chat. */
+function priceCompared(env: ChatEnvelope): boolean {
+  if (env.price_analysis?.items?.length) return true;
+  return (env.tools_invoked ?? []).some((t) => t.tool === "compare_price");
+}
+
+/** Did that comparison actually find a local/web reference to judge against? */
+function priceReferenceFound(env: ChatEnvelope): boolean {
+  if (env.price_analysis?.items?.some((it) => it.reference_price != null)) return true;
+  return (env.tools_invoked ?? []).some(
+    (t) => t.tool === "compare_price" && (t.result?.reference_price ?? null) !== null,
+  );
+}
+
 /** Backend threat block -> a normalized level string. The backend emits
  * `final_level` (see app/modules/threat_detection.py); level/risk_level are kept
  * as fallbacks. */
@@ -224,6 +239,9 @@ export function verdictFor(env: ChatEnvelope): AssistantVerdict {
   // A price above the local reference is a caution ("unusually high"), never an
   // outright fraud accusation — a high price alone isn't proof of a scam.
   if (isOverpriced(env)) return "caution";
+  // Price was checked but no reference was found — we genuinely can't judge it, so
+  // say so ("couldn't verify") rather than implying it's safe.
+  if (priceCompared(env) && !priceReferenceFound(env)) return "unknown";
   return "safe";
 }
 
@@ -263,7 +281,7 @@ export function toAssistantMessage(env: ChatEnvelope, id: string): AssistantMess
     role: "ai",
     text: env.reply || env.translation || "…",
     verdict,
-    verdictLabel: priceOnlyCaution ? "Price looks high" : undefined,
+    priceCaution: priceOnlyCaution,
     pattern,
     actions: actionsFor(env),
   };

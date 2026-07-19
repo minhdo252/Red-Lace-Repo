@@ -75,7 +75,9 @@ export const en = {
     suggestions: "Try asking",
     verdictSafe: "Looks safe",
     verdictCaution: "Be careful",
-    verdictScam: "This looks like a scam",
+    verdictScam: "Likely a scam",
+    verdictUnknown: "Couldn't verify",
+    verdictPriceHigh: "Price looks high",
     actionTranslate: "Translate a conversation",
     actionPrice: "Is this price fair?",
     actionTour: "Check if this tour is real",
@@ -191,6 +193,7 @@ export type Dict = typeof en;
 type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : string };
 
 export const vi: DeepPartial<Dict> = {
+  assistant: { verdictSafe: "Có vẻ ổn", verdictCaution: "Hãy cẩn thận", verdictScam: "Có thể là lừa đảo", verdictUnknown: "Chưa xác định được", verdictPriceHigh: "Giá có vẻ cao" },
   translate: { title: "Phiên dịch trực tiếp", subtitle: "Chạm, nói và mình sẽ dịch cả hai chiều.", tapToSpeak: "Chạm để nói", listening: "Đang nghe…", tapToStop: "Chạm để dừng", processing: "Đang dịch…", you: "Bạn", them: "Họ", summaryTitle: "Tóm tắt hội thoại", priceHeard: "Giá được nhắc đến", scamTitle: "Cẩn thận — có thể là lừa đảo", scamAction: "Cách xử lý", priceTitle: "Giá có vẻ cao", priceAction: "Xem chỗ giá hợp lý", notHeardTitle: "Mình chưa nghe rõ", notHeardBody: "Mình chưa nhận diện được rõ nội dung. Chạm vào micro và thử lại — nói gần hơn và chậm hơn một chút nhé.", scamFlagged: "Đã gắn cờ khả năng lừa đảo", priceFlagged: "Đã gắn cờ giá cao bất thường", newConversation: "Hội thoại mới" },
   common: { tagline: "Người bạn đồng hành an toàn của bạn ở Việt Nam", continue: "Tiếp tục", back: "Quay lại", cancel: "Huỷ", done: "Xong", tryAgain: "Thử lại", seeAll: "Xem tất cả", verified: "Đã xác minh", new: "Mới" },
   nav: { home: "Trang chủ", map: "Bản đồ", protect: "Bảo vệ", activity: "Hoạt động", profile: "Cá nhân" },
@@ -200,6 +203,7 @@ export const vi: DeepPartial<Dict> = {
 };
 
 export const zh: DeepPartial<Dict> = {
+  assistant: { verdictSafe: "看起来安全", verdictCaution: "请当心", verdictScam: "可能是骗局", verdictUnknown: "无法确认", verdictPriceHigh: "价格偏高" },
   translate: { title: "实时翻译", subtitle: "点一下、说话，我会为双方翻译。", tapToSpeak: "点击说话", listening: "正在聆听…", tapToStop: "点击停止", processing: "翻译中…", you: "你", them: "对方", summaryTitle: "对话摘要", priceHeard: "提到的价格", scamTitle: "注意 — 可能是骗局", scamAction: "如何应对", priceTitle: "价格偏高", priceAction: "查看价格合理的店", notHeardTitle: "没听清", notHeardBody: "我没能听清说的内容。请点击麦克风再试一次 — 靠近一点、说慢一点。", scamFlagged: "已标记可能的骗局", priceFlagged: "已标记价格偏高", newConversation: "新对话" },
   common: { tagline: "您游览越南时的安全护盾", continue: "继续", back: "返回", cancel: "取消", done: "完成", tryAgain: "重试", seeAll: "查看全部", verified: "已验证", new: "新" },
   nav: { home: "主页", map: "地图", protect: "守护", activity: "记录", profile: "我的" },
@@ -209,6 +213,7 @@ export const zh: DeepPartial<Dict> = {
 };
 
 export const ko: DeepPartial<Dict> = {
+  assistant: { verdictSafe: "안전해 보여요", verdictCaution: "주의하세요", verdictScam: "사기일 수 있어요", verdictUnknown: "확인할 수 없어요", verdictPriceHigh: "가격이 비싸 보여요" },
   translate: { title: "실시간 번역", subtitle: "탭하고 말하면 양쪽을 번역해 드려요.", tapToSpeak: "탭하여 말하기", listening: "듣는 중…", tapToStop: "탭하여 정지", processing: "번역 중…", you: "나", them: "상대방", summaryTitle: "대화 요약", priceHeard: "언급된 가격", scamTitle: "주의 — 사기일 수 있어요", scamAction: "대처 방법", priceTitle: "가격이 비싸 보여요", priceAction: "적정 가격 매장 보기", notHeardTitle: "잘 못 들었어요", notHeardBody: "무슨 말인지 정확히 인식하지 못했어요. 마이크를 탭하고 다시 시도해 주세요 — 조금 더 가까이, 천천히요.", scamFlagged: "사기 가능성 표시됨", priceFlagged: "높은 가격 표시됨", newConversation: "새 대화" },
   common: { tagline: "베트남 여행 중 당신의 방패", continue: "계속", back: "뒤로", cancel: "취소", done: "완료", tryAgain: "다시 시도", seeAll: "모두 보기", verified: "인증됨", new: "새로움" },
   nav: { home: "홈", map: "지도", protect: "보호", activity: "활동", profile: "프로필" },
@@ -218,6 +223,7 @@ export const ko: DeepPartial<Dict> = {
 };
 
 export const ru: DeepPartial<Dict> = {
+  assistant: { verdictSafe: "Выглядит безопасно", verdictCaution: "Будьте осторожны", verdictScam: "Похоже на мошенничество", verdictUnknown: "Не удалось проверить", verdictPriceHigh: "Цена выглядит высокой" },
   translate: { title: "Живой перевод", subtitle: "Нажмите, говорите — я переведу обе стороны.", tapToSpeak: "Нажмите, чтобы говорить", listening: "Слушаю…", tapToStop: "Нажмите, чтобы остановить", processing: "Перевожу…", you: "Вы", them: "Собеседник", summaryTitle: "Итог разговора", priceHeard: "Упомянутая цена", scamTitle: "Внимание — возможно мошенничество", scamAction: "Что делать", priceTitle: "Цена выглядит высокой", priceAction: "Показать места с честными ценами", notHeardTitle: "Я не расслышал", notHeardBody: "Не удалось разобрать сказанное. Нажмите на микрофон и попробуйте ещё раз — ближе и медленнее.", scamFlagged: "Отмечено как возможное мошенничество", priceFlagged: "Отмечена завышенная цена", newConversation: "Новый разговор" },
   common: { tagline: "Ваш щит во время путешествия по Вьетнаму", continue: "Продолжить", back: "Назад", cancel: "Отмена", done: "Готово", tryAgain: "Ещё раз", seeAll: "Все", verified: "Проверено", new: "Новое" },
   nav: { home: "Главная", map: "Карта", protect: "Защита", activity: "История", profile: "Профиль" },
