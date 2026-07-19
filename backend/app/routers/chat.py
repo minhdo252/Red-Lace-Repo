@@ -10,6 +10,7 @@ import time
 import unicodedata
 import uuid
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
@@ -583,6 +584,27 @@ def _extract_url(text: str) -> str | None:
     return match.group(0).rstrip(".,);") if match else None
 
 
+_SOCIAL_HOSTS = {"facebook", "fb", "instagram", "tiktok", "zalo", "m", "youtube", "twitter", "x", "threads"}
+
+
+def _ghost_name_from_url(url: str) -> str | None:
+    """A searchable business name derived from a bare domain (e.g. "vietravel.com"
+    -> "vietravel") so business-existence runs on it. Returns None for social
+    hosts (facebook.com/...) so check_ghost_tour's own resolver derives the page
+    slug / follows the share-link redirect instead."""
+    parsed = urlparse(url if "://" in url else f"https://{url}")
+    host = (parsed.netloc or parsed.path.split("/", 1)[0]).lower()
+    if host.startswith("www."):
+        host = host[4:]
+    labels = [label for label in host.split(".") if label]
+    if len(labels) < 2:
+        return None
+    sld = labels[-2]
+    if sld in _SOCIAL_HOSTS:
+        return None
+    return sld.replace("-", " ").strip() or None
+
+
 def _build_ghost_reply(result: dict[str, Any]) -> str:
     """Deterministic fallback verdict for the ghost-tour route (used when GLM advice
     is unavailable) — no LLM, straight from the safety breakdown."""
@@ -605,7 +627,11 @@ async def _run_ghost_tour_route(
     text. Returns None (fall through to the orchestrator) if the check itself
     errors, so a stray URL never dead-ends the turn."""
     try:
-        result = await check_ghost_tour(url=url, region=region, suspicious_text=text)
+        # Derive a name from a bare domain so the web-reputation check always runs;
+        # social URLs pass name=None so check_ghost_tour resolves the page slug itself.
+        result = await check_ghost_tour(
+            name=_ghost_name_from_url(url), url=url, region=region, suspicious_text=text
+        )
     except Exception:  # noqa: BLE001 - never crash; let the orchestrator handle it
         return None
 
