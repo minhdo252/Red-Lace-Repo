@@ -191,6 +191,8 @@ async def ensure_runtime_schema() -> None:
         await conn.execute(
             "ALTER TABLE embassies ADD COLUMN IF NOT EXISTS verification_status TEXT NOT NULL DEFAULT 'unverified'"
         )
+        await conn.execute("ALTER TABLE price_references ADD COLUMN IF NOT EXISTS source TEXT")
+        await conn.execute("ALTER TABLE price_references ADD COLUMN IF NOT EXISTS source_url TEXT")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_sos_events_session_id ON sos_events (session_id)")
         await conn.execute(
             """
