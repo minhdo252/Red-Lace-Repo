@@ -92,6 +92,8 @@ export type ChatEnvelope = {
   needs_retake?: boolean;
   retake_reason?: string | null;
   price_analysis?: PriceAnalysis | null;
+  // Module 2.2 ghost-tour / URL scam-check result (real: WHOIS + Gemini web reputation).
+  ghost_tour_analysis?: Record<string, unknown> | null;
   error?: string;
 };
 

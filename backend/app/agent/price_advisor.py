@@ -151,3 +151,55 @@ async def price_advice(items: list[dict[str, Any]], native_language: str = "en")
 
     text = (response.content or "").strip()
     return text or None
+
+
+_GHOST_SYSTEM_PROMPT = (
+    "You are a friendly travel-safety advisor for foreign tourists in Vietnam. Given the result "
+    "of a scam check on a tour/homestay link, write SHORT (2-4 sentences), warm, practical advice. "
+    "Use light markdown: **bold** for the single key takeaway, '- ' bullets only if they help. Use "
+    "ONLY the findings provided — never invent facts. No greeting, no sign-off."
+)
+
+
+async def ghost_tour_advice(result: dict[str, Any], native_language: str = "en") -> str | None:
+    """Friendly, markdown, tourist-language advice for a Module 2.2 ghost-tour/URL
+    scam check. Returns None on GLM failure so the caller falls back to a
+    deterministic reply."""
+    if not has_api_key():
+        return None
+
+    safety = result.get("safety") or {}
+    label = safety.get("label") or ""
+    reasons = safety.get("reasons") or []
+    risk_level = result.get("risk_level")
+    business = next(
+        (b for b in result.get("breakdown", []) if b.get("signal") == "business_existence"), {}
+    )
+    reasoning = (business.get("detail", {}) if business.get("available") else {}).get("reasoning") or ""
+
+    language = _LANG_NAMES.get((native_language or "en").lower(), "English")
+    is_unsafe = "Không an toàn" in label
+    stance = (
+        "This link looks UNSAFE / risky. Warn the tourist clearly, name the specific red flags, and "
+        "recommend they avoid it or verify through official channels before paying anything."
+        if is_unsafe
+        else "This link looks trustworthy based on the checks. Reassure the tourist, but still remind "
+        "them of basic caution (pay through the platform, keep records)."
+    )
+    user_content = (
+        f"Write the advice in {language}.\n"
+        f"Verdict: {label} (risk_level={risk_level}). Stance to follow: {stance}\n"
+        f"Reasons found: {reasons}\n"
+        f"Web-reputation notes: {reasoning or '(none)'}\n\n"
+        "Write the tourist-facing advice now."
+    )
+    messages = [
+        {"role": "system", "content": _GHOST_SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+    try:
+        response = await asyncio.to_thread(glm_chat, messages, temperature=0.4, max_tokens=2048)
+    except Exception:  # noqa: BLE001 - fall back to the deterministic reply
+        return None
+    text = (response.content or "").strip()
+    return text or None

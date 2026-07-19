@@ -132,6 +132,15 @@ def _score_business_existence(result: dict[str, Any] | None) -> tuple[float | No
                 "reason": f"Google Places lookup failed: {result.get('api_status')} — {result.get('error_message')}",
             }
         return None, {"available": False, **detail}
+    # Gemini web-reputation signal (no Google Places key): score on the verdict's
+    # legitimacy / scam-report findings rather than Google's review_count/rating.
+    if result.get("data_source") == "gemini_web":
+        status = result.get("status")
+        if result.get("scam_reports") or result.get("legitimacy") == "suspicious" or status == "not_found":
+            return 0.85, {"available": True, "detail": result}
+        if status == "found" and result.get("legitimacy") == "legitimate":
+            return 0.15, {"available": True, "detail": result}
+        return 0.5, {"available": True, "detail": result}  # uncertain / unknown
     if result.get("status") == "not_found":
         return 0.8, {"available": True, "detail": result}
     review_count = result.get("review_count") or 0
@@ -239,8 +248,16 @@ def translate_to_safety_label(ghost_tour_result: dict[str, Any]) -> dict[str, An
     if _domain_or_page_recently_created(breakdown_by_signal):
         reasons.append("Thời điểm tạo web gần đây")
 
-    business_status = business.get("detail", {}).get("status")
-    if business_status == "not_found":
+    business_detail = business.get("detail", {})
+    business_status = business_detail.get("status")
+    if business_detail.get("data_source") == "gemini_web":
+        if business_detail.get("scam_reports") or business_detail.get("legitimacy") == "suspicious":
+            reasons.append("Có báo cáo/dấu hiệu lừa đảo khi tìm trên web")
+        elif business_status == "not_found":
+            reasons.append("Không tìm thấy dấu vết đáng tin cậy trên web")
+        elif business_status == "uncertain":
+            reasons.append("Chưa xác minh được độ tin cậy trên web")
+    elif business_status == "not_found":
         reasons.append("Không khớp với link trên Google Map")
 
     review_burst = breakdown_by_signal.get("review_burst", {})
@@ -262,9 +279,9 @@ def translate_to_safety_label(ghost_tour_result: dict[str, Any]) -> dict[str, An
     if reasons:
         return {"label": "Không an toàn", "reasons": reasons}
 
-    # business_existence is available and none of the above triggered — the
-    # only way to reach here with business_status != "found" is not_found,
-    # which already added a reason above, so business_status == "found".
+    # business_existence is available and none of the above triggered.
+    if business_detail.get("data_source") == "gemini_web":
+        return {"label": "An toàn", "reasons": ["Có hiện diện web và đánh giá đáng tin cậy"]}
     return {"label": "An toàn", "reasons": ["Khớp với link trên Google Map"]}
 
 

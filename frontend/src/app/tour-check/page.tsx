@@ -21,6 +21,7 @@ import { Screen } from "@/components/shell/Screen";
 import { TopBar } from "@/components/shell/TopBar";
 import { Button } from "@/components/ui/Button";
 import { AnalysisLoader } from "@/components/ui/AnalysisLoader";
+import { Markdown } from "@/components/ui/Markdown";
 import { useApp, useT } from "@/i18n";
 import { usePhase, useFakeProgress } from "@/lib/hooks";
 import { cn, formatVnd, delay } from "@/lib/utils";
@@ -144,7 +145,7 @@ export default function TourCheckPage() {
             <div className="mt-4 flex items-center gap-3 rounded-2xl bg-teal/8 p-4">
               <Sparkles size={20} className="shrink-0 text-teal-deep" />
               <p className="text-[0.85rem] leading-snug text-ink-soft text-pretty">
-                Nón checks the page's history, whether reviewers are real, and if the price is too
+                Nón checks the page&apos;s history, whether reviewers are real, and if the price is too
                 good to be true.
               </p>
             </div>
@@ -259,7 +260,7 @@ export default function TourCheckPage() {
             {/* advice */}
             <div className="flex items-start gap-3 rounded-[var(--radius-card)] bg-teal/8 p-4">
               <Sparkles size={18} className="mt-0.5 shrink-0 text-teal-deep" />
-              <p className="text-[0.85rem] leading-snug text-ink-soft text-pretty">{report.advice}</p>
+              <Markdown text={report.advice} className="text-[0.85rem] leading-snug text-ink-soft text-pretty" />
             </div>
 
             <Button

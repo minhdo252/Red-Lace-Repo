@@ -160,3 +160,90 @@ async def gemini_search_price(
         "uncertain": bool(data.get("uncertain", price_vnd is None)),
         "notes": data.get("notes", ""),
     }
+
+
+def _build_business_prompt(name: str, url: str | None, region: str) -> str:
+    target = f'"{name}"' + (f" (link: {url})" if url else "")
+    return f"""\
+Search the web to judge whether {target}, a tour/homestay/travel operator in \
+{region}, Vietnam, is a REAL and TRUSTWORTHY business or a likely SCAM ("ghost \
+tour"). Look for: an established web/social presence, genuine reviews on \
+Google/TripAdvisor/Facebook, official listings, AND any scam reports, \
+complaints, or fraud warnings about it.
+
+RULES:
+1. Use ONLY what you actually find in search results. Never invent reviews or reports.
+2. "status": "found" if it has a real, verifiable presence; "not_found" if you find \
+   essentially nothing credible about it; "uncertain" if evidence is thin/mixed.
+3. "legitimacy": "legitimate" (well-established, positively reviewed), "suspicious" \
+   (thin presence, red flags, or fits ghost-tour patterns), or "unknown".
+4. "scam_reports": true ONLY if the ESTABLISHED operator itself is reported as fraudulent. Do \
+   NOT set it true merely because copycats/imitators use a similar name — a famous, well-\
+   reviewed operator with impostors is still "legitimate".
+5. "rating": an approximate overall rating (0-5) if you can find one, else null.
+6. In "reasoning", give 1-2 concrete sentences citing what you found (site/source names).
+
+Return ONLY valid JSON matching exactly this schema, no text before or after:
+
+{{
+  "status": "found" | "not_found" | "uncertain",
+  "legitimacy": "legitimate" | "suspicious" | "unknown",
+  "scam_reports": <true|false>,
+  "rating": <number 0-5 or null>,
+  "reasoning": "<1-2 sentences with sources>",
+  "source_url": "<a representative source URL you found, or empty string>"
+}}
+"""
+
+
+async def gemini_verify_business(name: str, url: str | None = None, region: str = "Hanoi") -> dict:
+    """Verify a tour/homestay operator via Gemini + Google Search — the real,
+    key-free (uses GEMINI_API_KEY) stand-in for a Google Places business check.
+
+    Always returns a dict; on any failure ``status`` is "uncertain" and
+    ``legitimacy`` "unknown" so the caller can treat it as an inconclusive
+    signal without try/except.
+    """
+    import asyncio
+
+    def _run() -> dict:
+        api_key = _require_api_key()
+        client = genai.Client(api_key=api_key)
+        prompt = _build_business_prompt(name, url, region)
+        response = client.models.generate_content(
+            model="gemini-3.1-flash-lite",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                tools=[types.Tool(google_search=types.GoogleSearch())],
+            ),
+        )
+        raw = response.text or ""
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if not match:
+            return {"status": "uncertain", "legitimacy": "unknown", "scam_reports": False,
+                    "rating": None, "reasoning": "no_json_in_response", "source_url": ""}
+        data = json.loads(match.group())
+        status = data.get("status")
+        if status not in ("found", "not_found", "uncertain"):
+            status = "uncertain"
+        legitimacy = data.get("legitimacy")
+        if legitimacy not in ("legitimate", "suspicious", "unknown"):
+            legitimacy = "unknown"
+        rating = data.get("rating")
+        if not isinstance(rating, (int, float)):
+            rating = None
+        return {
+            "status": status,
+            "legitimacy": legitimacy,
+            "scam_reports": bool(data.get("scam_reports", False)),
+            "rating": rating,
+            "reasoning": str(data.get("reasoning", "")),
+            "source_url": str(data.get("source_url", "")),
+        }
+
+    try:
+        return await asyncio.to_thread(_run)
+    except Exception as exc:  # noqa: BLE001 - inconclusive, never crash the composite
+        logger.error("Gemini business verify failed for %r: %s", name, exc)
+        return {"status": "uncertain", "legitimacy": "unknown", "scam_reports": False,
+                "rating": None, "reasoning": f"gemini_verify_error: {exc}", "source_url": ""}

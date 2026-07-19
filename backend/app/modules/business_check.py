@@ -35,6 +35,7 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 
 from app.config import settings
+from app.utils.gemini_search import gemini_verify_business
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +199,29 @@ async def _check_business_existence_mock(name: str, region: str | None, url: str
     return result
 
 
+async def _check_business_existence_web(name: str, region: str | None, url: str | None) -> dict[str, Any]:
+    """Real web-reputation check (Gemini + Google Search) used when no Google
+    Places key is set. Shapes Gemini's verdict into the result contract the
+    ghost-tour scorer consumes: status (found/not_found/uncertain) + the
+    gemini-specific legitimacy/scam_reports fields, tagged data_source="gemini_web"."""
+    verdict = await gemini_verify_business(name, url=url, region=region or "Hanoi")
+    logger.info(
+        "check_business_existence: Gemini web verify name=%r -> status=%s legitimacy=%s scam_reports=%s",
+        name, verdict.get("status"), verdict.get("legitimacy"), verdict.get("scam_reports"),
+    )
+    return {
+        "status": verdict.get("status", "uncertain"),
+        "name": name,
+        "region": region,
+        "legitimacy": verdict.get("legitimacy"),
+        "scam_reports": bool(verdict.get("scam_reports")),
+        "rating": verdict.get("rating"),
+        "reasoning": verdict.get("reasoning"),
+        "source_url": verdict.get("source_url"),
+        "data_source": "gemini_web",
+    }
+
+
 async def check_business_existence(name: str, region: str | None = None, url: str | None = None) -> dict[str, Any]:
     """`region` is optional (doc section 7's ghost-tour composite check
     works without it — see app/modules/ghost_tour_score.py::check_ghost_tour
@@ -209,7 +233,9 @@ async def check_business_existence(name: str, region: str | None = None, url: st
         return await _check_business_existence_mock(name, region, url)
 
     if not settings.google_places_api_key:
-        return {"status": "not_configured", "reason": "GOOGLE_PLACES_API_KEY not set"}
+        # No Google Places key -> real web-reputation verification via Gemini +
+        # Google Search (uses GEMINI_API_KEY), instead of "not_configured".
+        return await _check_business_existence_web(name, region, url)
 
     query = f"{name} {region}" if region else name
 

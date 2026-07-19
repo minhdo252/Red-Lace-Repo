@@ -14,12 +14,13 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from app.agent.orchestrator import handle_turn
-from app.agent.price_advisor import price_advice
+from app.agent.price_advisor import ghost_tour_advice, price_advice
 from app.ai.client import ai_client
 from app.config import settings
 from app.db.postgres import get_pool
 from app.modules.audio_pipe import normalize_transcribed_text, preprocess_audio_for_stt
 from app.modules.geo import resolve_region, validate_lat_lon
+from app.modules.ghost_tour_score import check_ghost_tour
 from app.modules.image_reader import read_image
 from app.modules.language import canonical_language_code, is_supported_native_language
 from app.modules.memory import trigger_background_compression
@@ -566,6 +567,58 @@ async def _run_price_text_route(
     }
 
 
+# A URL / domain in the text -> a "check this link" (ghost-tour) intent. Requires
+# either a scheme or a real letter-based TLD, so a bare price like "45.000" (digits
+# only) never matches.
+_URL_RE = re.compile(
+    r"https?://[^\s]+"
+    r"|(?:www\.|(?:[a-z0-9-]+\.)+(?:com|net|org|vn|io|co|biz|info|travel|tour|shop|store|link))"
+    r"(?:/[^\s]*)?",
+    re.IGNORECASE,
+)
+
+
+def _extract_url(text: str) -> str | None:
+    match = _URL_RE.search(text or "")
+    return match.group(0).rstrip(".,);") if match else None
+
+
+def _build_ghost_reply(result: dict[str, Any]) -> str:
+    """Deterministic fallback verdict for the ghost-tour route (used when GLM advice
+    is unavailable) — no LLM, straight from the safety breakdown."""
+    safety = result.get("safety") or {}
+    label = safety.get("label") or ""
+    reasons = safety.get("reasons") or []
+    head = (
+        "⚠️ **This link looks risky.**"
+        if "Không an toàn" in label
+        else "✅ **This link looks okay based on the checks.**"
+    )
+    return "\n".join([head, *[f"- {r}" for r in reasons]])
+
+
+async def _run_ghost_tour_route(
+    url: str, text: str, region: str | None, native_language: str
+) -> dict[str, Any] | None:
+    """Ghost-tour (Module 2.2) route — real composite scam check on a URL: WHOIS
+    domain age + Gemini web-reputation (business existence) + scam-pattern on the
+    text. Returns None (fall through to the orchestrator) if the check itself
+    errors, so a stray URL never dead-ends the turn."""
+    try:
+        result = await check_ghost_tour(url=url, region=region, suspicious_text=text)
+    except Exception:  # noqa: BLE001 - never crash; let the orchestrator handle it
+        return None
+
+    reply = await ghost_tour_advice(result, native_language) or _build_ghost_reply(result)
+    return {
+        "reply": reply,
+        "tools_invoked": [
+            {"tool": "check_ghost_tour", "arguments": {"url": url, "region": region}, "result": result}
+        ],
+        "ghost_tour_analysis": result,
+    }
+
+
 def _analysis_item(item_name: str | None, observed: Any, comparison: dict[str, Any]) -> dict[str, Any]:
     """Structured price-verdict row (same shape the image/text price routes build)."""
     return {
@@ -867,6 +920,7 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks) -> ChatR
     critic: dict[str, Any] | None = None
     normalized_prices: list[int] = []
     price_analysis: dict[str, Any] | None = None
+    ghost_tour_analysis: dict[str, Any] | None = None
     needs_retake = False
     retake_reason: str | None = None
     degraded_components: list[str] = []
@@ -921,11 +975,22 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks) -> ChatR
             if price_intent
             else None
         )
+        # A URL in the text -> Module 2.2 ghost-tour scam check (real: WHOIS domain age
+        # + Gemini web-reputation + scam-pattern), before the orchestrator.
+        ghost_result = None
+        if price_result is None:
+            url = _extract_url(clean_text)
+            if url:
+                ghost_result = await _run_ghost_tour_route(url, clean_text, region, native_language)
         if price_result is not None:
             reply = price_result["reply"]
             tools_invoked = price_result["tools_invoked"]
             normalized_prices = price_result["normalized_prices_vnd"]
             price_analysis = price_result["price_analysis"]
+        elif ghost_result is not None:
+            reply = ghost_result["reply"]
+            tools_invoked = ghost_result["tools_invoked"]
+            ghost_tour_analysis = ghost_result["ghost_tour_analysis"]
         else:  # normal chatbot — full orchestrator pipeline
             turn_result, translation_details, scam_result, threat_result = await asyncio.gather(
                 _run_orchestrator_for_chat(
@@ -972,6 +1037,7 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks) -> ChatR
         needs_retake=needs_retake,
         retake_reason=retake_reason,
         price_analysis=price_analysis,
+        ghost_tour_analysis=ghost_tour_analysis,
         chunk_sequence_id=request.chunk_sequence_id,
         is_final_chunk=request.is_final_chunk,
         resolved_region=region,
