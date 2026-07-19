@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-AITravelMate (Nón AI) — a FastAPI backend + single orchestrator agent that helps tourists in Hanoi/Sapa/Hoi An translate, flag price anomalies, and flag scams. It is the 48h-MVP infra scaffold described in `NON_AI~1.MD`; the README maps modules to doc sections. It boots and is fully testable with mocked AI responses (`AI_MODE=mock`, the default) — no API key required.
+AITravelMate (Nón AI) — a FastAPI backend + single orchestrator agent that helps tourists in Hanoi/Sapa/Hoi An translate, flag price anomalies, and flag scams. It is the 48h-MVP infra scaffold described in `docs/NON_AI~1.MD`; the README maps modules to doc sections. It boots and is fully testable with mocked AI responses (`AI_MODE=mock`, the default) — no API key required.
 
 ## Commands
 

@@ -1,4 +1,4 @@
-"""Single orchestrator + tool-calling agent (orchestration_flow.md, ORCH subgraph).
+"""Single orchestrator + tool-calling agent (docs/orchestration_flow.md, ORCH subgraph).
 
 Deliberately not a multi-agent swarm: one bounded model loop that calls tools and
 reasons over their results, with a critic pass gating any risk conclusion, and a hard

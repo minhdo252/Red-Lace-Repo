@@ -15,8 +15,9 @@ through the single `AIClient` gateway which is explicitly configured for differe
 modalities (Chat, Vision, Embedding).
 
 > **Integration handoff:** the full plan is in
-> [`IMPLEMENTATION_PLAN.md`](./IMPLEMENTATION_PLAN.md); live status / where-to-continue is
-> in [`PROGRESS.md`](./PROGRESS.md). Read those before continuing the integration.
+> [`IMPLEMENTATION_PLAN.md`](./docs/IMPLEMENTATION_PLAN.md); live status / where-to-continue is
+> in [`PROGRESS.md`](./docs/PROGRESS.md). Read those before continuing the integration.
+> All project docs live under [`docs/`](./docs/).
 
 ## Monorepo layout
 
@@ -26,8 +27,7 @@ Red-Lace-Repo/
   frontend/     # Next.js PWA (same-origin proxy → backend; mock fallback)
   db/           # Postgres schema + seed (db/init.sql)
   docker-compose.yml
-  IMPLEMENTATION_PLAN.md   # integration plan (portable handoff)
-  PROGRESS.md              # living status
+  docs/         # all project docs (plan, progress, deploy, architecture)
 ```
 
 ## Frontend ↔ backend integration
