@@ -169,13 +169,32 @@ export const blobToBase64 = readAsBase64;
 /* ---------- backend response -> frontend mock shapes ---------- */
 
 const SCAM_LABELS: Record<string, string> = {
-  price_scam: "Price-scam pattern",
+  price_scam: "Unusually high price",
   ghost_tour_pressure: "Pressure / ghost-tour pattern",
 };
+
+/** The price category reflects an "unusually high price", not proof of deception —
+ * on its own it stays a caution and never becomes an outright "scam" verdict. */
+const PRICE_CATEGORY = "price_scam";
 
 function topScam(flags?: ScamFlag[]): ScamFlag | null {
   if (!flags || !flags.length) return null;
   return flags.reduce((a, b) => ((b.best_score ?? 0) > (a.best_score ?? 0) ? b : a));
+}
+
+/** Highest-scoring *deception* flag (ghost-tour pressure, etc.) — excludes the
+ * price category, which is only ever surfaced as a caution. */
+function topDeceptionScam(flags?: ScamFlag[]): ScamFlag | null {
+  return topScam((flags ?? []).filter((f) => f.category !== PRICE_CATEGORY));
+}
+
+/** Was a quoted/observed price flagged above the local reference? Reads the
+ * structured price_analysis (text/image/voice routes) and any price_scam flag. */
+function isOverpriced(env: ChatEnvelope): boolean {
+  const pa = env.price_analysis;
+  if (pa?.overall_overpriced) return true;
+  if (pa?.items?.some((it) => it.overpriced)) return true;
+  return (env.scam_flags ?? []).some((f) => f.category === PRICE_CATEGORY);
 }
 
 /** Backend threat block -> a normalized level string. The backend emits
@@ -196,12 +215,15 @@ export function isCriticalThreat(env: ChatEnvelope): boolean {
 
 export function verdictFor(env: ChatEnvelope): AssistantVerdict {
   if (isCriticalThreat(env)) return "scam";
-  const top = topScam(env.scam_flags);
+  const top = topDeceptionScam(env.scam_flags);
   if (top) {
     const s = top.best_score ?? 0;
     if (s >= 0.72) return "scam";
     if (s >= 0.6) return "caution";
   }
+  // A price above the local reference is a caution ("unusually high"), never an
+  // outright fraud accusation — a high price alone isn't proof of a scam.
+  if (isOverpriced(env)) return "caution";
   return "safe";
 }
 
@@ -211,7 +233,7 @@ export function actionsFor(env: ChatEnvelope): AssistantAction[] {
   const cats = new Set((env.scam_flags ?? []).map((f) => f.category));
   const usedTour = (env.tools_invoked ?? []).some((t) => t.tool === "check_ghost_tour");
   if (cats.has("ghost_tour_pressure") || usedTour) actions.push({ label: "Verify this operator", kind: "tour" });
-  if (cats.has("price_scam")) actions.push({ label: "See fair-priced spots", kind: "map" });
+  if (cats.has("price_scam") || isOverpriced(env)) actions.push({ label: "See fair-priced spots", kind: "map" });
   actions.push({ label: "Translate my reply", kind: "translate" });
   const seen = new Set<string>();
   return actions.filter((a) => {
@@ -225,13 +247,24 @@ export function actionsFor(env: ChatEnvelope): AssistantAction[] {
 export function toAssistantMessage(env: ChatEnvelope, id: string): AssistantMessage {
   const verdict = verdictFor(env);
   const top = topScam(env.scam_flags);
-  const pattern = top?.category ? SCAM_LABELS[top.category] ?? top.category : undefined;
+  // A caution driven only by price says "price looks high" instead of the generic
+  // "be careful" — we state that the price is unusually high, not that it's a scam.
+  const deception = topDeceptionScam(env.scam_flags);
+  const priceOnlyCaution =
+    verdict === "caution" && isOverpriced(env) && (deception?.best_score ?? 0) < 0.6;
+  const pattern =
+    verdict === "safe" || priceOnlyCaution
+      ? undefined
+      : top?.category
+        ? SCAM_LABELS[top.category] ?? top.category
+        : undefined;
   return {
     id,
     role: "ai",
     text: env.reply || env.translation || "…",
     verdict,
-    pattern: verdict === "safe" ? undefined : pattern,
+    verdictLabel: priceOnlyCaution ? "Price looks high" : undefined,
+    pattern,
     actions: actionsFor(env),
   };
 }

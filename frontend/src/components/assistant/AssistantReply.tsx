@@ -53,6 +53,7 @@ export function AssistantReply({
   onAction?: (a: AssistantAction) => void;
 }) {
   const v = msg.verdict ? verdictCfg[msg.verdict] : null;
+  const verdictLabel = msg.verdictLabel ?? v?.label;
 
   return (
     <motion.div
@@ -64,7 +65,7 @@ export function AssistantReply({
       {v && (
         <div className={cn("mb-2.5 inline-flex items-center gap-2 rounded-full px-3 py-1.5", v.bg)}>
           <v.icon size={15} className={v.text} />
-          <span className={cn("text-sm font-bold", v.text)}>{v.label}</span>
+          <span className={cn("text-sm font-bold", v.text)}>{verdictLabel}</span>
         </div>
       )}
 

@@ -13,6 +13,9 @@ export type AssistantMessage = {
   text: string;
   image?: string; // object URL of a photo the user sent
   verdict?: AssistantVerdict;
+  /** Overrides the verdict badge label (e.g. "Price looks high" for a price-only
+   * caution, so we name the issue instead of the generic "Be careful"). */
+  verdictLabel?: string;
   pattern?: string;
   reasons?: string[];
   actions?: AssistantAction[];
