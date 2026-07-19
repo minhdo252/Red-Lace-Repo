@@ -11,9 +11,8 @@ import { TranscriptSummary } from "@/components/translate/TranscriptSummary";
 import { LanguageSwitcher } from "@/components/ui/LanguageSwitcher";
 import { useApp, useT } from "@/i18n";
 import { usePhase, useTimer, useStaggeredReveal } from "@/lib/hooks";
-import { formatDuration, delay } from "@/lib/utils";
+import { formatDuration } from "@/lib/utils";
 import { blobToBase64, chatRequest, localeToNativeLanguage, toTranslateTurn } from "@/lib/api";
-import { conversation } from "@/mocks/translate";
 import type { TranslateTurn } from "@/mocks/types";
 
 type P = "idle" | "listening" | "processing" | "result";
@@ -28,6 +27,8 @@ export default function TranslatePage() {
   const [turns, setTurns] = useState<TranslateTurn[]>([]);
   const [prices, setPrices] = useState<number[]>([]);
   const [usingBackend, setUsingBackend] = useState(false);
+  // Honest "couldn't hear it" message — shown instead of ever faking a conversation.
+  const [notice, setNotice] = useState<string | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
@@ -63,21 +64,21 @@ export default function TranslatePage() {
       recorderRef.current = null;
     });
 
-  // Begin a new utterance. If the mic is unavailable, stop() falls back to the
-  // scripted mock conversation so the screen still demos end to end.
+  // Begin a new utterance.
   const listen = async () => {
+    setNotice(null);
     reset();
     await startRecording();
     setPhase("listening");
   };
 
   const stop = async () => {
+    setNotice(null);
     setPhase("processing");
     const blob = await stopRecording();
     if (!blob || !blob.size) {
-      await delay(1000);
-      setTurns(conversation);
-      setUsingBackend(false);
+      // Nothing captured — say so honestly, don't invent a conversation.
+      setNotice(t.notHeardBody);
       setPhase("result");
       return;
     }
@@ -96,13 +97,18 @@ export default function TranslatePage() {
       const details = (env.translation_details ?? {}) as { detected_language?: string };
       const spoken = env.detected_language || details.detected_language;
       const turn = toTranslateTurn(env, spoken === "vi" ? "vendor" : "tourist");
-      setTurns((ts) => [...ts, turn]);
-      setPrices((ps) => [...ps, ...(env.normalized_prices_vnd ?? [])]);
-      setUsingBackend(true);
+      // Only surface a real transcription — never a blank/empty turn.
+      if ((turn.en || "").trim() || (turn.vi || "").trim()) {
+        setTurns((ts) => [...ts, turn]);
+        setPrices((ps) => [...ps, ...(env.normalized_prices_vnd ?? [])]);
+        setUsingBackend(true);
+      } else {
+        setNotice(t.notHeardBody);
+      }
     } else {
-      await delay(800);
-      setTurns(conversation);
-      setUsingBackend(false);
+      // Backend couldn't transcribe or was unreachable — be honest, never fake a
+      // scripted conversation.
+      setNotice(t.notHeardBody);
     }
     setPhase("result");
   };
@@ -111,6 +117,7 @@ export default function TranslatePage() {
     setTurns([]);
     setPrices([]);
     setUsingBackend(false);
+    setNotice(null);
     reset();
     setPhase("idle");
   };
@@ -224,6 +231,19 @@ export default function TranslatePage() {
                   className="pt-2"
                 >
                   <TranscriptSummary title={t.summaryTitle} priceLabel={t.priceHeard} data={summaryData} />
+                </motion.div>
+              )}
+              {notice && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mx-auto max-w-[92%] rounded-2xl border border-mid/40 bg-mid/10 p-5 text-center"
+                >
+                  <span className="mx-auto mb-2 grid h-11 w-11 place-items-center rounded-full bg-mid/20">
+                    <RotateCcw size={20} className="text-mid" />
+                  </span>
+                  <p className="font-display font-bold text-ink">{t.notHeardTitle}</p>
+                  <p className="mt-1 text-[0.88rem] leading-snug text-ink-soft text-pretty">{notice}</p>
                 </motion.div>
               )}
               <div className="h-2" />

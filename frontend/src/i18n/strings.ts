@@ -98,6 +98,8 @@ export const en = {
     scamAction: "How to handle this",
     priceTitle: "Price looks high",
     priceAction: "See fair-priced spots",
+    notHeardTitle: "I didn't catch that",
+    notHeardBody: "I couldn't recognise what was said clearly. Tap the mic and try again — a little closer and slower.",
     newConversation: "New conversation",
   },
   price: {
