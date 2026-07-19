@@ -128,7 +128,8 @@ export default function TranslatePage() {
           value: `${p.toLocaleString()}₫`,
           tone: "mid" as const,
         })),
-        scamCount: turns.filter((tn) => tn.scam).length,
+        scamCount: turns.filter((tn) => tn.scam && tn.scam.kind !== "price").length,
+        priceCount: turns.filter((tn) => tn.scam?.kind === "price").length,
       }
     : undefined;
 
@@ -197,14 +198,22 @@ export default function TranslatePage() {
               {shown.map((turn, i) => (
                 <div key={i} className="space-y-3">
                   <ChatBubble turn={turn} youLabel={t.you} themLabel={t.them} />
-                  {turn.scam && (
-                    <ScamBanner
-                      title={t.scamTitle}
-                      pattern={turn.scam.pattern}
-                      advice={turn.scam.advice}
-                      actionLabel={t.scamAction}
-                    />
-                  )}
+                  {turn.scam &&
+                    (turn.scam.kind === "price" ? (
+                      <ScamBanner
+                        title={t.priceTitle}
+                        advice={turn.scam.advice}
+                        actionLabel={t.priceAction}
+                        tone="caution"
+                      />
+                    ) : (
+                      <ScamBanner
+                        title={t.scamTitle}
+                        pattern={turn.scam.pattern}
+                        advice={turn.scam.advice}
+                        actionLabel={t.scamAction}
+                      />
+                    ))}
                 </div>
               ))}
               {allShown && (

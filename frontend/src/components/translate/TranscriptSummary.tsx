@@ -8,6 +8,8 @@ type SummaryData = {
   topic: string;
   pricesHeard: { label: string; value: string; tone: "high" | "mid" | "fair" }[];
   scamCount: number;
+  /** Unusually-high prices flagged (a caution, counted apart from real scams). */
+  priceCount?: number;
 };
 
 export function TranscriptSummary({
@@ -51,6 +53,13 @@ export function TranscriptSummary({
         <div className="mt-3 flex items-center gap-2 rounded-xl bg-danger/12 px-3 py-2 text-sm font-semibold text-danger">
           <ShieldAlert size={15} />
           {s.scamCount} scam pattern flagged
+        </div>
+      )}
+
+      {(s.priceCount ?? 0) > 0 && (
+        <div className="mt-3 flex items-center gap-2 rounded-xl bg-mid/15 px-3 py-2 text-sm font-semibold text-mid">
+          <Receipt size={15} />
+          {s.priceCount} price {(s.priceCount ?? 0) > 1 ? "alerts" : "alert"} — higher than usual
         </div>
       )}
     </div>

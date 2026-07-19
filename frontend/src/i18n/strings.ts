@@ -96,6 +96,8 @@ export const en = {
     priceHeard: "Price mentioned",
     scamTitle: "Heads up — possible scam",
     scamAction: "How to handle this",
+    priceTitle: "Price looks high",
+    priceAction: "See fair-priced spots",
     newConversation: "New conversation",
   },
   price: {

@@ -34,7 +34,7 @@ export function ChatBubble({
           mine
             ? "rounded-br-md bg-teal-deep text-white"
             : "rounded-bl-md bg-surface text-ink shadow-[var(--shadow-soft)]",
-          turn.scam && "ring-2 ring-danger/60",
+          turn.scam && (turn.scam.kind === "price" ? "ring-2 ring-mid/55" : "ring-2 ring-danger/60"),
         )}
       >
         <p className="text-[0.95rem] font-medium leading-snug">{turn.en}</p>

@@ -274,10 +274,23 @@ export function toTranslateTurn(env: ChatEnvelope, speakerRole: "tourist" | "ven
   const d = (env.translation_details ?? {}) as Record<string, string>;
   const source = d.source_text_clean || env.source_text || "";
   const translated = d.translated_text || env.translation || "";
-  const top = topScam(env.scam_flags);
-  const scam = top?.category
-    ? { pattern: SCAM_LABELS[top.category] ?? top.category, advice: env.reply || "Be cautious." }
-    : undefined;
+  // Banner text reads like the chatbot reply: drop a leading echo of the
+  // translation (already shown in the bubble) so only the guidance remains.
+  const rawReply = env.reply || "";
+  const advice =
+    (translated && rawReply.startsWith(translated) ? rawReply.slice(translated.length).trim() : rawReply) ||
+    "This price looks higher than usual.";
+
+  // Real deception (ghost-tour pressure, etc.) is a scam; a price above the local
+  // reference on its own is a "price looks high" caution — same as the chatbot,
+  // never an outright scam accusation.
+  const deception = topDeceptionScam(env.scam_flags);
+  let scam: TranslateTurn["scam"];
+  if (deception?.category) {
+    scam = { pattern: SCAM_LABELS[deception.category] ?? deception.category, advice, kind: "scam" };
+  } else if (isOverpriced(env)) {
+    scam = { pattern: "", advice, kind: "price" };
+  }
   if (speakerRole === "vendor") {
     return { speaker: "them", vi: source, en: translated, scam };
   }

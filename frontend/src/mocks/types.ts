@@ -33,6 +33,9 @@ export type TranslateTurn = {
   scam?: {
     pattern: string;
     advice: string;
+    /** "price" = an unusually high price (a caution — not fraud); "scam" = a real
+     * deception pattern. Absent defaults to "scam" (legacy/mock turns). */
+    kind?: "scam" | "price";
   };
 };
 
