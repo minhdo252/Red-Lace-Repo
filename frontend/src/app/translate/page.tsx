@@ -230,7 +230,13 @@ export default function TranslatePage() {
                   transition={{ delay: 0.2 }}
                   className="pt-2"
                 >
-                  <TranscriptSummary title={t.summaryTitle} priceLabel={t.priceHeard} data={summaryData} />
+                  <TranscriptSummary
+                    title={t.summaryTitle}
+                    priceLabel={t.priceHeard}
+                    scamFlaggedLabel={t.scamFlagged}
+                    priceFlaggedLabel={t.priceFlagged}
+                    data={summaryData}
+                  />
                 </motion.div>
               )}
               {notice && (

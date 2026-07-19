@@ -15,10 +15,15 @@ type SummaryData = {
 export function TranscriptSummary({
   title,
   priceLabel,
+  scamFlaggedLabel = "Possible scam flagged",
+  priceFlaggedLabel = "Price flagged — higher than usual",
   data,
 }: {
   title: string;
   priceLabel: string;
+  /** Localized chip labels (fall back to English for the mock/demo path). */
+  scamFlaggedLabel?: string;
+  priceFlaggedLabel?: string;
   /** Real summary from the backend; falls back to the mock summary when absent. */
   data?: SummaryData;
 }) {
@@ -52,14 +57,14 @@ export function TranscriptSummary({
       {s.scamCount > 0 && (
         <div className="mt-3 flex items-center gap-2 rounded-xl bg-danger/12 px-3 py-2 text-sm font-semibold text-danger">
           <ShieldAlert size={15} />
-          {s.scamCount} scam pattern flagged
+          {scamFlaggedLabel}
         </div>
       )}
 
       {(s.priceCount ?? 0) > 0 && (
         <div className="mt-3 flex items-center gap-2 rounded-xl bg-mid/15 px-3 py-2 text-sm font-semibold text-mid">
           <Receipt size={15} />
-          {s.priceCount} price {(s.priceCount ?? 0) > 1 ? "alerts" : "alert"} — higher than usual
+          {priceFlaggedLabel}
         </div>
       )}
     </div>
